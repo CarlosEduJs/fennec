@@ -25,9 +25,9 @@ pub fn generate(doc: &Document) -> String {
     }
 
     if has_state {
-        generate_stateful(&doc, &mut out);
+        generate_stateful(doc, &mut out);
     } else {
-        generate_stateless(&doc, &mut out);
+        generate_stateless(doc, &mut out);
     }
 
     out
@@ -110,22 +110,19 @@ fn gen_text(el: &Element, indent: &str, depth: usize, stateful: bool) -> String 
     let mut out = format!("{indent}div()\n");
 
     for (key, val) in &el.attrs {
-        match key.as_str() {
-            "size" => {
-                let v = val.as_str();
-                let ts = match v {
-                    "xs" => "text_xs()",
-                    "sm" => "text_sm()",
-                    "base" => "text_base()",
-                    "lg" => "text_lg()",
-                    "xl" => "text_xl()",
-                    "2xl" | "xxl" => "text_2xl()",
-                    "3xl" => "text_3xl()",
-                    _ => "text_base()",
-                };
-                out.push_str(&format!("{indent}    .{ts}\n"));
-            }
-            _ => {}
+        if key.as_str() == "size" {
+            let v = val.as_str();
+            let ts = match v {
+                "xs" => "text_xs()",
+                "sm" => "text_sm()",
+                "base" => "text_base()",
+                "lg" => "text_lg()",
+                "xl" => "text_xl()",
+                "2xl" | "xxl" => "text_2xl()",
+                "3xl" => "text_3xl()",
+                _ => "text_base()",
+            };
+            out.push_str(&format!("{indent}    .{ts}\n"));
         }
     }
 
@@ -169,25 +166,22 @@ fn gen_button(el: &Element, indent: &str, depth: usize, stateful: bool) -> Strin
     out.push_str(&format!("{indent}    .cursor_pointer()\n"));
 
     for (key, val) in &el.attrs {
-        match key.as_str() {
-            "onclick" => {
-                let handler = val.as_str();
-                let trampoline = format!("__fncc_cmd_{handler}");
-                if stateful {
-                    // Level 3: use entity handle pattern
-                    out.push_str(&format!("{indent}    .on_click({{\n"));
-                    out.push_str(&format!("{indent}        let handle = handle.clone();\n"));
-                    out.push_str(&format!("{indent}        move |_, _, cx| {{\n"));
-                    out.push_str(&format!("{indent}            handle.update(cx, |this, cx| {{\n"));
-                    out.push_str(&format!("{indent}                {trampoline}(this, cx);\n"));
-                    out.push_str(&format!("{indent}            }}).ok();\n"));
-                    out.push_str(&format!("{indent}        }}\n"));
-                    out.push_str(&format!("{indent}    }})\n"));
-                } else {
-                    out.push_str(&format!("{indent}    .on_click({trampoline})\n"));
-                }
+        if key.as_str() == "onclick" {
+            let handler = val.as_str();
+            let trampoline = format!("__fncc_cmd_{handler}");
+            if stateful {
+                // Level 3: use entity handle pattern
+                out.push_str(&format!("{indent}    .on_click({{\n"));
+                out.push_str(&format!("{indent}        let handle = handle.clone();\n"));
+                out.push_str(&format!("{indent}        move |_, _, cx| {{\n"));
+                out.push_str(&format!("{indent}            handle.update(cx, |this, cx| {{\n"));
+                out.push_str(&format!("{indent}                {trampoline}(this, cx);\n"));
+                out.push_str(&format!("{indent}            }}).ok();\n"));
+                out.push_str(&format!("{indent}        }}\n"));
+                out.push_str(&format!("{indent}    }})\n"));
+            } else {
+                out.push_str(&format!("{indent}    .on_click({trampoline})\n"));
             }
-            _ => {}
         }
     }
 
@@ -268,12 +262,11 @@ fn to_snake_case(name: &str) -> String {
 fn collect_commands(el: &Element) -> Vec<String> {
     let mut cmds = Vec::new();
     for (key, val) in &el.attrs {
-        if key == "onclick" {
-            if let AttrValue::String(name) = val {
-                if !cmds.contains(name) {
-                    cmds.push(name.clone());
-                }
-            }
+        if key == "onclick"
+            && let AttrValue::String(name) = val
+            && !cmds.contains(name)
+        {
+            cmds.push(name.clone());
         }
     }
     for child in &el.children {

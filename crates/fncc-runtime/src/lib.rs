@@ -1,6 +1,6 @@
 //! fncc runtime — re-exports GPUI and provides convenience wrappers.
-pub use gpui::*;
 pub use gpui::prelude::*;
+pub use gpui::*;
 
 /// A vertical stack (flex column) component.
 pub fn stack() -> Div {

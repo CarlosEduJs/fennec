@@ -1,6 +1,6 @@
-pub mod parser;
 pub mod codegen;
 pub mod config;
+pub mod parser;
 
 pub use parser::parse;
 
@@ -17,16 +17,13 @@ pub fn generate_all(ui_dir: &Path, out_file: &Path) {
         let entry = entry.expect("failed to read entry");
         let path = entry.path();
         if path.extension().is_some_and(|ext| ext == "fui") {
-            let source = std::fs::read_to_string(&path)
-                .expect(&format!("failed to read {:?}", path));
-            let ast = parser::parse(&source)
-                .expect(&format!("failed to parse {:?}", path));
+            let source = std::fs::read_to_string(&path).unwrap_or_else(|_| panic!("failed to read {:?}", path));
+            let ast = parser::parse(&source).unwrap_or_else(|_| panic!("failed to parse {:?}", path));
             let generated = codegen::generate(&ast);
             output.push_str(&generated);
             output.push('\n');
         }
     }
 
-    std::fs::write(out_file, &output)
-        .expect("failed to write generated file");
+    std::fs::write(out_file, &output).expect("failed to write generated file");
 }

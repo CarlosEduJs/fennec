@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, FnArg, ItemFn, ReturnType, Type, TypeReference};
+use syn::{FnArg, ItemFn, ReturnType, Type, TypeReference, parse_macro_input};
 
 /// Marks a function as a fncc command handler.
 ///
@@ -32,10 +32,7 @@ use syn::{parse_macro_input, FnArg, ItemFn, ReturnType, Type, TypeReference};
 pub fn command(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let func = parse_macro_input!(item as ItemFn);
     let name = &func.sig.ident;
-    let trampoline_name = syn::Ident::new(
-        &format!("__fncc_cmd_{name}"),
-        name.span(),
-    );
+    let trampoline_name = syn::Ident::new(&format!("__fncc_cmd_{name}"), name.span());
 
     let is_return_ok = match &func.sig.output {
         ReturnType::Default => true,
@@ -45,12 +42,8 @@ pub fn command(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let arg_count = func.sig.inputs.len();
 
     if !is_return_ok {
-        let msg = format!(
-            "`#[fncc::command]` on `{name}`: command must return ()"
-        );
-        return syn::Error::new_spanned(&func.sig.output, msg)
-            .to_compile_error()
-            .into();
+        let msg = format!("`#[fncc::command]` on `{name}`: command must return ()");
+        return syn::Error::new_spanned(&func.sig.output, msg).to_compile_error().into();
     }
 
     let expanded = match arg_count {
@@ -104,12 +97,8 @@ pub fn command(_attr: TokenStream, item: TokenStream) -> TokenStream {
             }
         }
         n => {
-            let msg = format!(
-                "`#[fncc::command]` on `{name}`: expected 0, 1, or 2 arguments, got {n}"
-            );
-            return syn::Error::new_spanned(&func.sig, msg)
-                .to_compile_error()
-                .into();
+            let msg = format!("`#[fncc::command]` on `{name}`: expected 0, 1, or 2 arguments, got {n}");
+            return syn::Error::new_spanned(&func.sig, msg).to_compile_error().into();
         }
     };
 

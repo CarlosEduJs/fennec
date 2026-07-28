@@ -9,8 +9,7 @@ pub struct FnccConfig {
 }
 
 pub fn load(path: &Path) -> Result<FnccConfig, String> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("failed to read config: {e}"))?;
+    let content = std::fs::read_to_string(path).map_err(|e| format!("failed to read config: {e}"))?;
 
     // Simple TOML-like parsing for POC
     // In production, use a proper TOML crate

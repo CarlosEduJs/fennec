@@ -34,8 +34,7 @@ pub enum Node {
 }
 
 pub fn parse(source: &str) -> Result<Document, String> {
-    let mut pairs = FnccParser::parse(Rule::document, source)
-        .map_err(|e| format!("parse error: {e}"))?;
+    let mut pairs = FnccParser::parse(Rule::document, source).map_err(|e| format!("parse error: {e}"))?;
 
     let pair = pairs.next().expect("document should exist");
 
@@ -123,8 +122,7 @@ fn parse_element(pair: Pair<Rule>) -> Element {
             Rule::children => {
                 for child in inner.into_inner() {
                     // children contains nodes; unwrap node.inner
-                    let actual = child.into_inner().next()
-                        .expect("node should have one child");
+                    let actual = child.into_inner().next().expect("node should have one child");
                     match actual.as_rule() {
                         Rule::element => {
                             children.push(Node::Element(parse_element(actual)));

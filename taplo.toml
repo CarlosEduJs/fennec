@@ -1,0 +1,4 @@
+[formatting]
+indent_string = "    "
+indent_width = 4
+reorder_keys = true
