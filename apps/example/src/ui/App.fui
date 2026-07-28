@@ -1,0 +1,5 @@
+<Stack direction="vertical" gap="12">
+    <Text size="xl">Hello World</Text>
+    <Text>This is Fennec 🦊</Text>
+    <Button onclick="handle_click">Click here</Button>
+</Stack>
