@@ -3,6 +3,6 @@
 ---
 
 <Stack direction="vertical" gap="12">
-    <Text size="xl">Contador: {state.count}</Text>
+    <Text size="xl">Counter: {state.count}</Text>
     <Button onclick="handle_click">+1</Button>
 </Stack>

@@ -6,4 +6,5 @@ members = [
     "crates/fennec-runtime",
     "crates/fennec",
     "apps/example",
+    "xtask",
 ]

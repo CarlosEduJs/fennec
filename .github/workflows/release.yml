@@ -1,0 +1,59 @@
+name: Release Crates & Publish
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release & Publish Crates
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run Bump and Update Versioning
+        run: cargo run --locked -p xtask -- bump
+
+      - name: Commit and Push Version Updates
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [[ -n $(git status --porcelain) ]]; then
+            git add Cargo.toml Cargo.lock crates/ apps/ .changes/
+            git commit -m "chore(release): bump crate versions and update changelogs [skip ci]"
+            git push origin main
+          else
+            echo "Nenhuma alteração de versão para commitar."
+          fi
+
+      - name: Publish to Crates.io, Tag & Create GitHub Releases
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -n "$CARGO_REGISTRY_TOKEN" ]; then
+            cargo run --locked -p xtask -- publish --execute
+          else
+            echo "⚠️ CARGO_REGISTRY_TOKEN não configurado. Executando simulação de publicação e release..."
+            cargo run --locked -p xtask -- publish --dry-run
+          fi
