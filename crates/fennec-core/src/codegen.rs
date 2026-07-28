@@ -12,13 +12,15 @@ pub fn generate(doc: &Document) -> String {
         out.push('\n');
     }
 
-    // emit compile-time validation for each referenced command
+    // collect referenced command names for validation
     let commands = collect_commands(&doc.root);
     if !commands.is_empty() {
         out.push_str("#[allow(unused)]\n");
         out.push_str(&format!("fn _fennec_validate_{file_id}() {{\n"));
         for cmd in &commands {
-            out.push_str(&format!("    let _: fn() = {cmd};\n"));
+            let trampoline = format!("__fennec_cmd_{cmd}");
+            // validate the trampoline exists (indirectly validates the command)
+            out.push_str(&format!("    let _ = {trampoline};\n"));
         }
         out.push_str("}\n\n");
     }
@@ -171,8 +173,9 @@ fn gen_button(el: &Element, indent: &str, depth: usize) -> String {
         match key.as_str() {
             "onclick" => {
                 let handler = val.as_str();
+                let trampoline = format!("__fennec_cmd_{handler}");
                 out.push_str(&format!(
-                    "{indent}    .on_click(|_, _, _| {{ {handler}() }})\n"
+                    "{indent}    .on_click({trampoline})\n"
                 ));
             }
             _ => {}

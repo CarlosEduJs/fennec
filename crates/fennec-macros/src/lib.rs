@@ -15,7 +15,7 @@ use syn::{parse_macro_input, ItemFn, ReturnType};
 /// # Level 2 — Event argument
 /// ```ignore
 /// #[fennec::command]
-/// pub fn handle_click(event: ClickEvent) {
+/// pub fn handle_click(event: &ClickEvent) {
 ///     println!("clicked at {:?}", event.position);
 /// }
 /// ```
@@ -23,6 +23,10 @@ use syn::{parse_macro_input, ItemFn, ReturnType};
 pub fn command(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let func = parse_macro_input!(item as ItemFn);
     let name = &func.sig.ident;
+    let trampoline_name = syn::Ident::new(
+        &format!("__fennec_cmd_{name}"),
+        name.span(),
+    );
 
     let is_return_ok = match &func.sig.output {
         ReturnType::Default => true,
@@ -39,10 +43,38 @@ pub fn command(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     .to_compile_error()
                     .into();
             }
+
+            // Level 1: trampoline ignores all args
+            let expanded = quote! {
+                #func
+
+                #[allow(unused)]
+                fn #trampoline_name(
+                    event: &ClickEvent,
+                    _window: &mut Window,
+                    _cx: &mut App,
+                ) {
+                    let _ = event;
+                    #name();
+                }
+            };
+            return expanded.into();
         }
         1 => {
-            // Level 2: fn(event) — single event argument
-            // Accept any single argument; GPUI types are checked by the compiler
+            // Level 2: trampoline passes event by reference
+            let expanded = quote! {
+                #func
+
+                #[allow(unused)]
+                fn #trampoline_name(
+                    event: &ClickEvent,
+                    _window: &mut Window,
+                    _cx: &mut App,
+                ) {
+                    #name(event);
+                }
+            };
+            return expanded.into();
         }
         n => {
             let msg = format!(
@@ -53,8 +85,6 @@ pub fn command(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 .into();
         }
     }
-
-    quote!(#func).into()
 }
 
 fn is_unit(ty: &syn::Type) -> bool {

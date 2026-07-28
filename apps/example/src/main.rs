@@ -16,8 +16,8 @@ impl Render for RootView {
 }
 
 #[fennec::command]
-fn handle_click() {
-    println!("clicked!");
+fn handle_click(event: &ClickEvent) {
+    println!("clicked at position {:?}", event.position());
 }
 
 fn main() {
