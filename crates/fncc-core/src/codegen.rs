@@ -1,10 +1,11 @@
 use crate::parser::{AttrValue, Document, Element, Node};
 
-static FILE_COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
 pub fn generate(doc: &Document) -> String {
+    generate_with_id(doc, 0)
+}
+
+pub fn generate_with_id(doc: &Document, file_id: usize) -> String {
     let mut out = String::new();
-    let file_id = FILE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let has_state = doc.state_type.is_some();
 
     if let Some(ref fm) = doc.frontmatter {
@@ -455,11 +456,10 @@ mod tests {
 
     #[test]
     fn test_regression_multiple_calls_have_unique_validation_fn_names() {
-        let a = generate_from("<Button onclick=\"x\">X</Button>");
-        let b = generate_from("<Button onclick=\"x\">X</Button>");
-        // FILE_COUNTER makes validation fn names different
+        let doc = parse("<Button onclick=\"x\">X</Button>").unwrap();
+        let a = generate_with_id(&doc, 0);
+        let b = generate_with_id(&doc, 1);
         assert_ne!(a, b);
-        // both should compile to the same structure though
         assert!(a.contains("__fncc_cmd_x"));
         assert!(b.contains("__fncc_cmd_x"));
     }
@@ -480,11 +480,9 @@ mod tests {
     }
 
     #[test]
-    fn test_regression_file_counter_does_not_overflow() {
-        // Reset counter for test
+    fn test_regression_many_calls_do_not_panic() {
         for _ in 0..100 {
             generate_from("<Button onclick=\"f\">F</Button>");
         }
-        // Should not panic
     }
 }
