@@ -49,6 +49,18 @@ enum Commands {
         #[arg(long)]
         execute: bool,
     },
+    /// gera o relatorio de release formatado em tabela e lista Markdown
+    Plan {
+        /// salva o relatorio Markdown em um arquivo
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    /// cria ou atualiza o Release PR com tabela de versao e lista de notas
+    ReleasePr {
+        /// branch base (padrao: main)
+        #[arg(short, long, default_value = "main")]
+        base: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -105,6 +117,8 @@ fn main() -> Result<()> {
         Commands::Check => run_check(&root)?,
         Commands::Bump { dry_run } => run_bump(&root, dry_run)?,
         Commands::Publish { dry_run, execute } => run_publish(&root, dry_run, execute)?,
+        Commands::Plan { output } => run_plan(&root, output)?,
+        Commands::ReleasePr { base } => run_release_pr(&root, &base)?,
     }
 
     Ok(())
@@ -610,6 +624,183 @@ fn run_publish(root: &Path, dry_run: bool, execute: bool) -> Result<()> {
         println!("\nℹ️  Simulation mode (dry-run). No crates published, tags created, or releases dispatched.");
     } else {
         println!("\n🎉 All crates published and GitHub Releases created successfully!");
+    }
+
+    Ok(())
+}
+
+fn generate_release_plan_markdown(root: &Path) -> Result<Option<String>> {
+    let available_crates = get_workspace_crates(root)?;
+    let change_files = parse_change_files(root)?;
+
+    if change_files.is_empty() {
+        return Ok(None);
+    }
+
+    let mut highest_bumps: HashMap<String, BumpType> = HashMap::new();
+    let mut crate_summaries: HashMap<String, Vec<String>> = HashMap::new();
+
+    for cf in &change_files {
+        for (krate, bump_type) in &cf.crate_bumps {
+            if !available_crates.contains_key(krate) {
+                continue;
+            }
+            highest_bumps
+                .entry(krate.clone())
+                .and_modify(|existing| {
+                    if *bump_type > *existing {
+                        *existing = *bump_type;
+                    }
+                })
+                .or_insert(*bump_type);
+
+            if !cf.summary.is_empty() {
+                crate_summaries
+                    .entry(krate.clone())
+                    .or_default()
+                    .push(cf.summary.clone());
+            }
+        }
+    }
+
+    if highest_bumps.is_empty() {
+        return Ok(None);
+    }
+
+    let mut md = String::new();
+    md.push_str("# 📦 Release Packages\n\n");
+    md.push_str("This PR accumulates the version updates and release notes of the crates based on the pending changes in `.changes/`.\n\n");
+
+
+    md.push_str("### 📋 Summary of Version Bumps\n\n");
+    md.push_str("| Crate | Version | New Version | Type |\n");
+    md.push_str("| :--- | :---: | :---: | :---: |\n");
+
+    let mut details_section = String::new();
+
+    let mut sorted_crates: Vec<_> = highest_bumps.keys().cloned().collect();
+    sorted_crates.sort();
+
+    for krate in &sorted_crates {
+        let bump_type = highest_bumps[krate];
+        if let Some(crate_dir) = available_crates.get(krate) {
+            let cargo_toml_path = crate_dir.join("Cargo.toml");
+            let content = fs::read_to_string(&cargo_toml_path)?;
+            let doc: DocumentMut = content.parse()?;
+            let current_version_str = doc["package"]["version"]
+                .as_str()
+                .unwrap_or("0.0.0");
+            let current_version = Version::parse(current_version_str)?;
+            let new_version = bump_type.apply(&current_version);
+            let bump_str = match bump_type {
+                BumpType::Patch => "patch",
+                BumpType::Minor => "minor",
+                BumpType::Major => "major",
+            };
+
+            md.push_str(&format!(
+                "| 📦 `{krate}` | `{current_version_str}` | `{new_version}` | `{bump_str}` |\n"
+            ));
+
+            let summaries = crate_summaries.get(krate).cloned().unwrap_or_default();
+            details_section.push_str(&format!(
+                "<details open>\n<summary><b>{krate}</b> (v{current_version_str} ➔ <code>v{new_version}</code>)</summary>\n\n"
+            ));
+            for summary in summaries {
+                let clean_line = summary.trim_start_matches("- ").trim();
+                details_section.push_str(&format!("- {clean_line}\n"));
+            }
+            details_section.push_str("\n</details>\n\n");
+        }
+    }
+
+    md.push_str("\n---\n\n");
+    md.push_str("### 📝 Details of Changes by Crate\n\n");
+    md.push_str(&details_section);
+    md.push_str("---\n\n");
+    md.push_str("> **Instruction for the Maintainer**: When performing the **Merge** of this PR into the `main` branch, the packages will be published on **Crates.io**, with the automatic creation of **Git Tags** and **GitHub Releases**.\n");
+
+    Ok(Some(md))
+}
+
+fn run_plan(root: &Path, output: Option<PathBuf>) -> Result<()> {
+    let report = generate_release_plan_markdown(root)?;
+    match report {
+        Some(md) => {
+            if let Some(out_path) = output {
+                fs::write(&out_path, &md)?;
+                println!("Report generated: {}", out_path.display());
+            } else {
+                println!("{md}");
+            }
+        }
+        None => println!("ℹ️  No pending changes in .changes/"),
+    }
+    Ok(())
+}
+
+fn run_release_pr(root: &Path, base: &str) -> Result<()> {
+    let report = generate_release_plan_markdown(root)?;
+    let body = match report {
+        Some(b) => b,
+        None => {
+            println!("ℹ️  No pending changes in .changes/ to generate a Release PR.");
+            return Ok(());
+        }
+    };
+
+    println!("📄 Report generated successfully! Applying version bumps...");
+
+    run_bump(root, false)?;
+
+    let pr_body_file = root.join(".changes_pr_body.md");
+    fs::write(&pr_body_file, &body)?;
+    
+    println!("\n✨ PR Body generated:\n");
+    println!("{body}");
+
+    let pr_title = "Version Packages";
+
+    let list_output = std::process::Command::new("gh")
+        .args(["pr", "list", "--base", base, "--json", "number,title", "--jq", ".[] | select(.title | contains(\"version packages\")) | .number"])
+        .output();
+
+    if let Ok(out) = list_output {
+        let pr_num = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if !pr_num.is_empty() {
+            println!("Update release PR #{pr_num}...");
+            let edit_status = std::process::Command::new("gh")
+                .args(["pr", "edit", &pr_num, "--title", pr_title, "--body-file", pr_body_file.to_str().unwrap()])
+                .status();
+            let _ = fs::remove_file(&pr_body_file);
+            if edit_status.map_or(false, |s| s.success()) {
+                println!("🎉 Release PR updated successfully!");
+                return Ok(());
+            }
+        }
+    }
+
+
+    println!("🆕 Creating new Release PR on GitHub...");
+    let create_status = std::process::Command::new("gh")
+        .args([
+            "pr",
+            "create",
+            "--title",
+            pr_title,
+            "--body-file",
+            pr_body_file.to_str().unwrap(),
+            "--base",
+            base,
+        ])
+        .status();
+
+    let _ = fs::remove_file(&pr_body_file);
+
+    if create_status.map_or(false, |s| s.success()) {
+        println!("🎉 Release PR created successfully!");
+    } else {
+        println!("Files bumpeds in local.");
     }
 
     Ok(())
