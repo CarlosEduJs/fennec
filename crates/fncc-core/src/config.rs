@@ -1,41 +1,40 @@
+use serde::Deserialize;
 use std::path::Path;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Deserialize)]
+#[serde(default)]
 pub struct FnccConfig {
+    #[serde(rename = "ui")]
     pub ui_dir: String,
+    #[serde(rename = "lib")]
     pub lib_dir: String,
+    #[serde(rename = "output")]
     pub output_dir: String,
+    #[serde(rename = "entry")]
     pub entry: String,
+}
+
+impl Default for FnccConfig {
+    fn default() -> Self {
+        Self {
+            ui_dir: "src/ui".into(),
+            lib_dir: String::new(),
+            output_dir: "target/fncc".into(),
+            entry: String::new(),
+        }
+    }
 }
 
 pub fn load(path: &Path) -> Result<FnccConfig, String> {
     let content = std::fs::read_to_string(path).map_err(|e| format!("failed to read config: {e}"))?;
 
-    // Simple TOML-like parsing for POC
-    // In production, use a proper TOML crate
-    let mut config = FnccConfig::default();
+    let mut config: FnccConfig = toml::from_str(&content).map_err(|e| format!("failed to parse config: {e}"))?;
 
-    for line in content.lines() {
-        let line = line.trim();
-        if let Some((key, value)) = line.split_once('=') {
-            let key = key.trim();
-            let value = value.trim().trim_matches('"');
-            match key {
-                "ui" => config.ui_dir = value.to_string(),
-                "lib" => config.lib_dir = value.to_string(),
-                "output" => config.output_dir = value.to_string(),
-                "entry" => config.entry = value.to_string(),
-                _ => {}
-            }
-        }
-    }
-
-    // apply defaults
     if config.ui_dir.is_empty() {
-        config.ui_dir = "src/ui".to_string();
+        config.ui_dir = "src/ui".into();
     }
     if config.output_dir.is_empty() {
-        config.output_dir = "target/fncc".to_string();
+        config.output_dir = "target/fncc".into();
     }
 
     Ok(config)
@@ -110,10 +109,10 @@ mod tests {
     }
 
     #[test]
-    fn test_values_with_extra_whitespace_trimmed() {
+    fn test_values_with_extra_whitespace_preserved() {
         let path = write_config(r#"ui = "  spacey  ""#);
         let cfg = load(&path).unwrap();
-        // homemade parser doesn't trim value's inner whitespace, only quotes
+        // TOML preserves whitespace inside quoted strings
         assert_eq!(cfg.ui_dir, "  spacey  ");
         let _ = std::fs::remove_file(&path);
     }
@@ -127,8 +126,8 @@ mod tests {
     }
 
     #[test]
-    fn test_lines_without_equals_are_ignored() {
-        let path = write_config("ui=\"ok\"\njust a comment\nlib=\"val\"");
+    fn test_comments_are_ignored() {
+        let path = write_config("ui=\"ok\"\n# this is a comment\nlib=\"val\"");
         let cfg = load(&path).unwrap();
         assert_eq!(cfg.ui_dir, "ok");
         assert_eq!(cfg.lib_dir, "val");
