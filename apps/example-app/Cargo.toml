@@ -1,8 +1,8 @@
 [package]
-name = "fncc-example"
-version = "0.0.0"
 edition = "2024"
+name = "fncc-example"
 publish = false
+version = "0.0.0"
 
 [dependencies]
 fncc = { path = "../../crates/fncc", version = "0.1.0" }

@@ -1,15 +1,15 @@
 [package]
-name = "fncc-macros"
-version = "0.1.0"
-edition = "2024"
 description = "Proc-macros for the fncc native UI framework — provides #[fncc::command] and #[fncc::render]"
-license = "Apache-2.0"
-repository = "https://github.com/carlosedujs/fncc"
+edition = "2024"
 homepage = "https://github.com/carlosedujs/fncc"
+license = "Apache-2.0"
+name = "fncc-macros"
+repository = "https://github.com/carlosedujs/fncc"
+version = "0.1.0"
 
 [lib]
 proc-macro = true
 
 [dependencies]
-syn = { version = "2", features = ["full"] }
 quote = "1"
+syn = { version = "2", features = ["full"] }

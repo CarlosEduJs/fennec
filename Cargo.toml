@@ -1,5 +1,4 @@
 [workspace]
-resolver = "3"
 members = [
     "crates/fncc-core",
     "crates/fncc-macros",
@@ -8,3 +7,4 @@ members = [
     "apps/example-app",
     "xtask",
 ]
+resolver = "3"
