@@ -151,4 +151,4 @@ This project is in early design. Issues and design discussions are welcome — e
 
 ## License
 
-MIT License. See [LICENSE](LICENSE) for details.
+APACHE 2.0 License. See [LICENSE](LICENSE) for details.
