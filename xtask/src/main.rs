@@ -144,7 +144,7 @@ fn find_workspace_root() -> Result<PathBuf> {
     Err(anyhow!("No Cargo.toml containing a [workspace] table found in current directory or any parent directories."))
 }
 
-fn get_workspace_crates(root: &Path) -> Result<HashMap<String, PathBuf>> {
+fn get_workspace_crates_internal(root: &Path, include_non_publishable: bool) -> Result<HashMap<String, PathBuf>> {
     let root_toml_path = root.join("Cargo.toml");
     let content = fs::read_to_string(&root_toml_path)?;
     let doc: DocumentMut = content.parse()?;
@@ -160,7 +160,8 @@ fn get_workspace_crates(root: &Path) -> Result<HashMap<String, PathBuf>> {
                         let c_content = fs::read_to_string(&crate_toml)?;
                         let c_doc: DocumentMut = c_content.parse()?;
                         if let Some(pkg) = c_doc.get("package").and_then(|p| p.as_table_like()) {
-                            if pkg.get("publish").and_then(|p| p.as_bool()) == Some(false) {
+                            let is_publish_false = pkg.get("publish").and_then(|p| p.as_bool()) == Some(false);
+                            if is_publish_false && !include_non_publishable {
                                 continue;
                             }
                             if let Some(name) = pkg.get("name").and_then(|n| n.as_str()) {
@@ -176,6 +177,14 @@ fn get_workspace_crates(root: &Path) -> Result<HashMap<String, PathBuf>> {
     }
 
     Ok(crates)
+}
+
+fn get_workspace_crates(root: &Path) -> Result<HashMap<String, PathBuf>> {
+    get_workspace_crates_internal(root, false)
+}
+
+fn get_all_workspace_crates(root: &Path) -> Result<HashMap<String, PathBuf>> {
+    get_workspace_crates_internal(root, true)
 }
 
 fn run_change(root: &Path, krate: Option<String>, bump: Option<String>, message: Option<String>) -> Result<()> {
@@ -486,7 +495,8 @@ fn run_bump(root: &Path, dry_run: bool) -> Result<()> {
 
     if !new_versions.is_empty() {
         println!("🔗 Updating inter-crate dependency version references...");
-        for (_krate, crate_dir) in &available_crates {
+        let all_crates = get_all_workspace_crates(root)?;
+        for (_krate, crate_dir) in &all_crates {
             let cargo_toml_path = crate_dir.join("Cargo.toml");
             let content = fs::read_to_string(&cargo_toml_path)?;
             let mut doc: DocumentMut = content.parse()?;
