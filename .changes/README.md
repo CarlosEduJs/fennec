@@ -7,7 +7,7 @@ Este diretório contém os arquivos de declaração de mudança de versão para 
 Você pode utilizar a ferramenta `cargo xtask`:
 
 ```bash
-cargo run -p xtask -- change
+cargo xtask change
 ```
 
 Ou criar manualmente um arquivo `.md` neste diretório (ex: `.changes/minha-feature.md`) com o seguinte formato:

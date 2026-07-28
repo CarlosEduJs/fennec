@@ -15,10 +15,10 @@ Write UI with `.fui` files. Compile to a native binary. No Electron, no WebView,
 ```toml
 # Cargo.toml
 [dependencies]
-fennec = { git = "https://github.com/carlosedujs/fennec" }
+fennec = "0.1"
 
 [build-dependencies]
-fennec-core = { git = "https://github.com/carlosedujs/fennec" }
+fennec-core = "0.1"
 ```
 
 ```rust

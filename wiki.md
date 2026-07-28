@@ -227,7 +227,7 @@ The hybrid approach gives us fast iteration during the POC while keeping the Car
 
 **Positive consequence:** Fennec doesn't need to invent a reactivity system. GPUI's `Model`/`View` + `cx.notify()` already delivers this behavior. The compiler's job is only to generate the right call in the right place.
 
-Interpolation like `{state.count}` in markup is resolved at **compile-time**: the codegen generates `format!("{}", self.count)`, and GPUI handles re-rendering when `cx.notify()` fires.
+Interpolation like `{state.count}` in markup is lowered at **compile-time**: code generation emits `format!("{}", self.count)` into the `render` method, while `self.count` is evaluated at runtime during rendering and recomputed after `cx.notify()` triggers a re-render.
 
 ### 4.6 State: explicit, not implicit
 
@@ -270,10 +270,6 @@ use crate::lib::{CounterState, handle_click};
 **Decision:** `fncc.config.toml` handles only UI/dev-experience metadata. `Cargo.toml` continues to exist normally, managed by the developer (dependencies, etc.). Clean separation, no magical generation of one from the other.
 
 ```toml
-[package]
-name = "my-app"
-version = "0.1.0"
-
 [paths]
 ui = "src/ui"
 lib = "src"

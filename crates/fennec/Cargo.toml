@@ -4,5 +4,5 @@ version = "0.0.0"
 edition = "2024"
 
 [dependencies]
-fennec-macros = { path = "../fennec-macros" }
-fennec-runtime = { path = "../fennec-runtime" }
+fennec-macros = { path = "../fennec-macros", version = "0.0.0" }
+fennec-runtime = { path = "../fennec-runtime", version = "0.0.0" }

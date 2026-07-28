@@ -20,4 +20,5 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Validate Changeset Files
-        run: cargo run -p xtask -- check
+        run: cargo run --locked -p xtask -- check
+

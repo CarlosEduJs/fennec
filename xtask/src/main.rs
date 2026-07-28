@@ -12,7 +12,7 @@ use walkdir::WalkDir;
 
 #[derive(Parser)]
 #[command(name = "xtask")]
-#[command(about = "manage release crates", long_about = None)]
+#[command(about = "Manage release crates and changes for Fennec workspace", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -20,44 +20,44 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// add new file in .changes/
+    /// Add a new change declaration file in .changes/
     Change {
-        /// crate name (eg: fennec-runtime)
+        /// Crate name (e.g. fennec-runtime)
         #[arg(short, long)]
         krate: Option<String>,
-        /// patch, minor, major
+        /// Bump level: patch, minor, major
         #[arg(short, long)]
         bump: Option<String>,
-        /// description for changelog
+        /// Summary description for the CHANGELOG
         #[arg(short, long)]
         message: Option<String>,
     },
-    /// this checks the .changes/ directory
+    /// Check and validate the files in .changes/
     Check,
-    /// bump versions of crates based on .changes/ and update CHANGELOG.md
+    /// Apply version bumps from .changes/, update Cargo.toml files and CHANGELOG.md
     Bump {
-        /// dry run mode, does not modify files
+        /// Dry-run mode, simulate without writing changes to disk
         #[arg(long)]
         dry_run: bool,
     },
-    /// publish crates to crates.io in the correct order
+    /// Publish crates to crates.io and create Git tags + GitHub Releases
     Publish {
-        /// dry run mode, does not publish crates
-        #[arg(long)]
+        /// Dry-run mode, simulate without publishing crates or creating releases
+        #[arg(long, conflicts_with = "execute")]
         dry_run: bool,
-        /// actually execute the publish commands
-        #[arg(long)]
+        /// Execute real publication commands
+        #[arg(long, conflicts_with = "dry_run")]
         execute: bool,
     },
-    /// gera o relatorio de release formatado em tabela e lista Markdown
+    /// Generate a Markdown release report with tables and detailed changes
     Plan {
-        /// salva o relatorio Markdown em um arquivo
+        /// Save the Markdown report to a file
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
-    /// cria ou atualiza o Release PR com tabela de versao e lista de notas
+    /// Create or update the Release PR on GitHub with version tables and notes
     ReleasePr {
-        /// branch base (padrao: main)
+        /// Base branch (default: main)
         #[arg(short, long, default_value = "main")]
         base: String,
     },
@@ -77,7 +77,7 @@ impl BumpType {
             "patch" => Ok(BumpType::Patch),
             "minor" => Ok(BumpType::Minor),
             "major" => Ok(BumpType::Major),
-            _ => Err(anyhow!("Tipo de bump inválido: '{s}'. Use patch, minor ou major.")),
+            _ => Err(anyhow!("Invalid bump type: '{s}'. Use 'patch', 'minor', or 'major'.")),
         }
     }
 
@@ -127,19 +127,21 @@ fn main() -> Result<()> {
 fn find_workspace_root() -> Result<PathBuf> {
     let mut current = std::env::current_dir()?;
     loop {
-        if current.join("Cargo.toml").exists() && current.join(".changes").exists() {
-            return Ok(current);
+        let cargo_toml = current.join("Cargo.toml");
+        if cargo_toml.exists() {
+            if let Ok(content) = fs::read_to_string(&cargo_toml) {
+                if let Ok(doc) = content.parse::<DocumentMut>() {
+                    if doc.contains_key("workspace") {
+                        return Ok(current);
+                    }
+                }
+            }
         }
         if !current.pop() {
             break;
         }
     }
-    let pwd = std::env::current_dir()?;
-    if pwd.join("Cargo.toml").exists() {
-        Ok(pwd)
-    } else {
-        Err(anyhow!("no Cargo.toml found in current directory or any parent directories"))
-    }
+    Err(anyhow!("No Cargo.toml containing a [workspace] table found in current directory or any parent directories."))
 }
 
 fn get_workspace_crates(root: &Path) -> Result<HashMap<String, PathBuf>> {
@@ -153,15 +155,19 @@ fn get_workspace_crates(root: &Path) -> Result<HashMap<String, PathBuf>> {
         if let Some(members) = workspace.get("members").and_then(|m| m.as_array()) {
             for member in members {
                 if let Some(rel_path) = member.as_str() {
-                    if rel_path == "xtask" {
-                        continue;
-                    }
                     let crate_toml = root.join(rel_path).join("Cargo.toml");
                     if crate_toml.exists() {
                         let c_content = fs::read_to_string(&crate_toml)?;
                         let c_doc: DocumentMut = c_content.parse()?;
-                        if let Some(name) = c_doc.get("package").and_then(|p| p.get("name")).and_then(|n| n.as_str()) {
-                            crates.insert(name.to_string(), root.join(rel_path));
+                        if let Some(pkg) = c_doc.get("package").and_then(|p| p.as_table_like()) {
+                            if pkg.get("publish").and_then(|p| p.as_bool()) == Some(false) {
+                                continue;
+                            }
+                            if let Some(name) = pkg.get("name").and_then(|n| n.as_str()) {
+                                if name != "xtask" {
+                                    crates.insert(name.to_string(), root.join(rel_path));
+                                }
+                            }
                         }
                     }
                 }
@@ -179,16 +185,18 @@ fn run_change(root: &Path, krate: Option<String>, bump: Option<String>, message:
     }
 
     let available_crates = get_workspace_crates(root)?;
+    let mut list: Vec<_> = available_crates.keys().cloned().collect();
+    list.sort();
+
     let selected_crate = match krate {
         Some(k) => {
             if !available_crates.contains_key(&k) {
-                return Err(anyhow!("Crate '{k}' not found in the workspace. Crates available: {:?}", available_crates.keys().collect::<Vec<_>>()));
+                return Err(anyhow!("Crate '{k}' not found in the workspace. Available crates: {:?}", list));
             }
             k
         }
         None => {
-            println!("Crates available:");
-            let list: Vec<_> = available_crates.keys().collect();
+            println!("Available crates:");
             for (i, name) in list.iter().enumerate() {
                 println!("  [{}] {}", i + 1, name);
             }
@@ -200,7 +208,7 @@ fn run_change(root: &Path, krate: Option<String>, bump: Option<String>, message:
             if idx == 0 || idx > list.len() {
                 return Err(anyhow!("Selection out of range."));
             }
-            list[idx - 1].to_string()
+            list[idx - 1].clone()
         }
     };
 
@@ -208,7 +216,7 @@ fn run_change(root: &Path, krate: Option<String>, bump: Option<String>, message:
         Some(b) => BumpType::from_str(&b)?,
         None => {
             println!("Type of change (bump):");
-            println!("  [1] patch  (fix bugs / small changes)");
+            println!("  [1] patch  (bug fixes / minor changes)");
             println!("  [2] minor  (new features, backward compatible)");
             println!("  [3] major  (breaking changes)");
             print!("Option (1-3): ");
@@ -225,7 +233,13 @@ fn run_change(root: &Path, krate: Option<String>, bump: Option<String>, message:
     };
 
     let summary = match message {
-        Some(m) => m,
+        Some(m) => {
+            let trimmed = m.trim().to_string();
+            if trimmed.is_empty() {
+                return Err(anyhow!("The change message description cannot be empty."));
+            }
+            trimmed
+        }
         None => {
             print!("Describe the changes briefly for the CHANGELOG: ");
             io::stdout().flush()?;
@@ -233,7 +247,7 @@ fn run_change(root: &Path, krate: Option<String>, bump: Option<String>, message:
             io::stdin().read_line(&mut input)?;
             let trimmed = input.trim().to_string();
             if trimmed.is_empty() {
-                return Err(anyhow!("the description cannot be empty."));
+                return Err(anyhow!("The description cannot be empty."));
             }
             trimmed
         }
@@ -254,7 +268,7 @@ fn run_change(root: &Path, krate: Option<String>, bump: Option<String>, message:
     );
 
     fs::write(&filepath, file_content)?;
-    println!("Change registered successfully in: .changes/{filename}");
+    println!("✅ Change registered successfully in: .changes/{filename}");
 
     Ok(())
 }
@@ -272,27 +286,28 @@ fn parse_change_files(root: &Path) -> Result<Vec<ChangeFile>> {
         let path = entry.path();
         if path.is_file() && path.extension().map_or(false, |ext| ext == "md") {
             let filename = path.file_name().unwrap().to_string_lossy();
-            if filename == "README.md" {
+            if filename == "README.md" || filename.starts_with('.') {
                 continue;
             }
 
             let content = fs::read_to_string(path)?;
-            if let Some((frontmatter, body)) = split_frontmatter(&content) {
-                let crate_bumps: HashMap<String, String> = serde_yaml::from_str(frontmatter)
-                    .with_context(|| format!("err analyze YAML frontmatter in {}", path.display()))?;
+            let (frontmatter, body) = split_frontmatter(&content)
+                .ok_or_else(|| anyhow!("Invalid or missing YAML frontmatter in change file: {}", path.display()))?;
 
-                let mut parsed_bumps = HashMap::new();
-                for (krate, b_str) in crate_bumps {
-                    let b_type = BumpType::from_str(&b_str)?;
-                    parsed_bumps.insert(krate, b_type);
-                }
+            let crate_bumps: HashMap<String, String> = serde_yaml_ng::from_str(frontmatter)
+                .with_context(|| format!("Error parsing YAML frontmatter in {}", path.display()))?;
 
-                change_files.push(ChangeFile {
-                    path: path.to_path_buf(),
-                    crate_bumps: parsed_bumps,
-                    summary: body.trim().to_string(),
-                });
+            let mut parsed_bumps = HashMap::new();
+            for (krate, b_str) in crate_bumps {
+                let b_type = BumpType::from_str(&b_str)?;
+                parsed_bumps.insert(krate, b_type);
             }
+
+            change_files.push(ChangeFile {
+                path: path.to_path_buf(),
+                crate_bumps: parsed_bumps,
+                summary: body.trim().to_string(),
+            });
         }
     }
 
@@ -306,7 +321,7 @@ fn split_frontmatter(content: &str) -> Option<(&str, &str)> {
     }
     let rest = &trimmed[3..];
     if let Some(end_idx) = rest.find("\n---") {
-        let frontmatter = &rest[..end_idx];
+        let frontmatter = rest[..end_idx].trim();
         let body = &rest[end_idx + 4..];
         Some((frontmatter, body))
     } else {
@@ -319,7 +334,7 @@ fn run_check(root: &Path) -> Result<()> {
     let change_files = parse_change_files(root)?;
 
     if change_files.is_empty() {
-        println!("⚠️   No change files found in .changes/");
+        println!("⚠️  No change files found in .changes/");
         return Ok(());
     }
 
@@ -328,12 +343,12 @@ fn run_check(root: &Path) -> Result<()> {
         println!("🔍 Verifying: {}", cf.path.display());
         for (krate, _bump) in &cf.crate_bumps {
             if !available_crates.contains_key(krate) {
-                println!("❌ err in {}: Crate '{}' not in workspace.", cf.path.display(), krate);
+                println!("❌ Error in {}: Crate '{}' does not exist in workspace.", cf.path.display(), krate);
                 has_error = true;
             }
         }
         if cf.summary.is_empty() {
-            println!("❌ Error in {}: Description of the change is empty.", cf.path.display());
+            println!("❌ Error in {}: Change summary description is empty.", cf.path.display());
             has_error = true;
         }
     }
@@ -346,23 +361,23 @@ fn run_check(root: &Path) -> Result<()> {
     }
 }
 
-fn run_bump(root: &Path, dry_run: bool) -> Result<()> {
+struct BumpPlan {
+    change_files: Vec<ChangeFile>,
+    highest_bumps: HashMap<String, BumpType>,
+    crate_summaries: HashMap<String, Vec<String>>,
+}
+
+fn collect_bump_plan(root: &Path) -> Result<BumpPlan> {
     let available_crates = get_workspace_crates(root)?;
     let change_files = parse_change_files(root)?;
 
-    if change_files.is_empty() {
-        println!("ℹ️  No pending changes in .changes/");
-        return Ok(());
-    }
-
-    // Determine the highest bump type for each crate and collect summaries
     let mut highest_bumps: HashMap<String, BumpType> = HashMap::new();
     let mut crate_summaries: HashMap<String, Vec<String>> = HashMap::new();
 
     for cf in &change_files {
         for (krate, bump_type) in &cf.crate_bumps {
             if !available_crates.contains_key(krate) {
-                continue;
+                return Err(anyhow!("Unknown crate '{krate}' referenced in change file: {}", cf.path.display()));
             }
             highest_bumps
                 .entry(krate.clone())
@@ -382,13 +397,64 @@ fn run_bump(root: &Path, dry_run: bool) -> Result<()> {
         }
     }
 
+    // Transitive bump propagation: if crate A is bumped, any workspace crate B depending on A via path dependency must be bumped too.
+    let mut changed = true;
+    while changed {
+        changed = false;
+        let current_bumped: Vec<String> = highest_bumps.keys().cloned().collect();
+        for (krate, crate_dir) in &available_crates {
+            if highest_bumps.contains_key(krate) {
+                continue;
+            }
+            let cargo_toml_path = crate_dir.join("Cargo.toml");
+            if let Ok(content) = fs::read_to_string(&cargo_toml_path) {
+                if let Ok(doc) = content.parse::<DocumentMut>() {
+                    for dep_section in ["dependencies", "dev-dependencies", "build-dependencies"] {
+                        if let Some(deps) = doc.get(dep_section).and_then(|d| d.as_table_like()) {
+                            for (dep_name, _) in deps.iter() {
+                                if current_bumped.contains(&dep_name.to_string()) {
+                                    highest_bumps.insert(krate.clone(), BumpType::Patch);
+                                    crate_summaries
+                                        .entry(krate.clone())
+                                        .or_default()
+                                        .push("Updated internal workspace dependency version references.".to_string());
+                                    changed = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if changed {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(BumpPlan {
+        change_files,
+        highest_bumps,
+        crate_summaries,
+    })
+}
+
+fn run_bump(root: &Path, dry_run: bool) -> Result<()> {
+    let available_crates = get_workspace_crates(root)?;
+    let plan = collect_bump_plan(root)?;
+
+    if plan.highest_bumps.is_empty() {
+        println!("ℹ️  No pending changes in .changes/");
+        return Ok(());
+    }
+
     let today = Local::now().format("%Y-%m-%d").to_string();
     let mut new_versions: HashMap<String, String> = HashMap::new();
 
-    println!("processing bumps:");
+    println!("🚀 Processing version bumps:");
 
     for (krate, crate_dir) in &available_crates {
-        if let Some(&bump_type) = highest_bumps.get(krate) {
+        if let Some(&bump_type) = plan.highest_bumps.get(krate) {
             let cargo_toml_path = crate_dir.join("Cargo.toml");
             let content = fs::read_to_string(&cargo_toml_path)?;
             let mut doc: DocumentMut = content.parse()?;
@@ -409,21 +475,17 @@ fn run_bump(root: &Path, dry_run: bool) -> Result<()> {
             );
 
             if !dry_run {
-                // update Cargo.toml version
                 doc["package"]["version"] = value(&new_version_str);
                 fs::write(&cargo_toml_path, doc.to_string())?;
 
-                // update CHANGELOG.md
-                let summaries = crate_summaries.get(krate).cloned().unwrap_or_default();
+                let summaries = plan.crate_summaries.get(krate).cloned().unwrap_or_default();
                 update_crate_changelog(crate_dir, krate, &new_version_str, &today, &summaries)?;
             }
         }
     }
 
-
-    // update references of inter-crate dependencies in the workspace
     if !new_versions.is_empty() {
-        println!("🔗 updating references of inter-crate dependencies...");
+        println!("🔗 Updating inter-crate dependency version references...");
         for (_krate, crate_dir) in &available_crates {
             let cargo_toml_path = crate_dir.join("Cargo.toml");
             let content = fs::read_to_string(&cargo_toml_path)?;
@@ -456,18 +518,17 @@ fn run_bump(root: &Path, dry_run: bool) -> Result<()> {
         }
     }
 
-    // Apagar arquivos .changes/ processados
     if !dry_run {
-        for cf in &change_files {
+        for cf in &plan.change_files {
             fs::remove_file(&cf.path)?;
         }
-        println!("🗑️  Processed files in .changes/ have been removed.");
+        println!("🗑️  Processed change files in .changes/ removed.");
     }
 
     if dry_run {
-        println!("🔍 Simulation mode (dry-run). No changes were saved to disk.");
+        println!("🔍 Simulation mode (dry-run). No changes saved to disk.");
     } else {
-        println!("✨ Bump completed successfully!");
+        println!("✨ Version bump completed successfully!");
     }
 
     Ok(())
@@ -496,7 +557,6 @@ fn update_crate_changelog(
     }
     entry.push('\n');
 
-    // Insert the new entry after the first "## " header or at the end if not found
     if let Some(pos) = old_content.find("\n## ") {
         old_content.insert_str(pos + 1, &entry);
     } else {
@@ -541,20 +601,22 @@ fn create_tag_and_github_release(krate: &str, version: &str, crate_dir: &Path, e
     if execute && !dry_run {
         let tag_status = std::process::Command::new("git")
             .args(["tag", "-a", &tag, "-m", &format!("Release {tag}")])
-            .status();
+            .status()?;
 
-        match tag_status {
-            Ok(s) if s.success() => println!("    ✅ Local Git tag created: {tag}"),
-            _ => println!("    ℹ️  Git tag {tag} already exists or could not be created locally."),
+        if !tag_status.success() {
+            println!("    ℹ️ Local Git tag {tag} already exists or was skipped.");
+        } else {
+            println!("    ✅ Local Git tag created: {tag}");
         }
 
         let push_status = std::process::Command::new("git")
             .args(["push", "origin", &tag])
-            .status();
+            .status()?;
 
-        match push_status {
-            Ok(s) if s.success() => println!("    ✅ Pushed Git tag to remote (origin {tag})"),
-            _ => println!("    ℹ️  Could not push tag {tag} to remote or tag already pushed."),
+        if !push_status.success() {
+            println!("    ℹ️ Git tag {tag} push skipped or already remote.");
+        } else {
+            println!("    ✅ Pushed Git tag to remote (origin {tag})");
         }
 
         let gh_status = std::process::Command::new("gh")
@@ -571,7 +633,7 @@ fn create_tag_and_github_release(krate: &str, version: &str, crate_dir: &Path, e
 
         match gh_status {
             Ok(s) if s.success() => println!("    🎉 GitHub Release created successfully for {tag}!"),
-            _ => println!("    ℹ️  GitHub Release creation skipped or gh CLI unavailable."),
+            _ => println!("    ℹ️ GitHub Release creation skipped or gh CLI unavailable."),
         }
     } else {
         println!("  [SIMULATION] git tag -a {tag} -m \"Release {tag}\"");
@@ -585,6 +647,7 @@ fn create_tag_and_github_release(krate: &str, version: &str, crate_dir: &Path, e
 fn run_publish(root: &Path, dry_run: bool, execute: bool) -> Result<()> {
     let available_crates = get_workspace_crates(root)?;
 
+    // Define publication order based on dependency graph
     let order = ["fennec-macros", "fennec-core", "fennec-runtime", "fennec"];
 
     println!("Order of publication & releases:");
@@ -631,58 +694,26 @@ fn run_publish(root: &Path, dry_run: bool, execute: bool) -> Result<()> {
 
 fn generate_release_plan_markdown(root: &Path) -> Result<Option<String>> {
     let available_crates = get_workspace_crates(root)?;
-    let change_files = parse_change_files(root)?;
+    let plan = collect_bump_plan(root)?;
 
-    if change_files.is_empty() {
-        return Ok(None);
-    }
-
-    let mut highest_bumps: HashMap<String, BumpType> = HashMap::new();
-    let mut crate_summaries: HashMap<String, Vec<String>> = HashMap::new();
-
-    for cf in &change_files {
-        for (krate, bump_type) in &cf.crate_bumps {
-            if !available_crates.contains_key(krate) {
-                continue;
-            }
-            highest_bumps
-                .entry(krate.clone())
-                .and_modify(|existing| {
-                    if *bump_type > *existing {
-                        *existing = *bump_type;
-                    }
-                })
-                .or_insert(*bump_type);
-
-            if !cf.summary.is_empty() {
-                crate_summaries
-                    .entry(krate.clone())
-                    .or_default()
-                    .push(cf.summary.clone());
-            }
-        }
-    }
-
-    if highest_bumps.is_empty() {
+    if plan.highest_bumps.is_empty() {
         return Ok(None);
     }
 
     let mut md = String::new();
     md.push_str("# 📦 Release Packages\n\n");
-    md.push_str("This PR accumulates the version updates and release notes of the crates based on the pending changes in `.changes/`.\n\n");
-
+    md.push_str("This PR accumulates version updates and release notes for crates based on pending changes in `.changes/`.\n\n");
 
     md.push_str("### 📋 Summary of Version Bumps\n\n");
-    md.push_str("| Crate | Version | New Version | Type |\n");
+    md.push_str("| Crate | Current Version | New Version | Type |\n");
     md.push_str("| :--- | :---: | :---: | :---: |\n");
 
     let mut details_section = String::new();
-
-    let mut sorted_crates: Vec<_> = highest_bumps.keys().cloned().collect();
+    let mut sorted_crates: Vec<_> = plan.highest_bumps.keys().cloned().collect();
     sorted_crates.sort();
 
     for krate in &sorted_crates {
-        let bump_type = highest_bumps[krate];
+        let bump_type = plan.highest_bumps[krate];
         if let Some(crate_dir) = available_crates.get(krate) {
             let cargo_toml_path = crate_dir.join("Cargo.toml");
             let content = fs::read_to_string(&cargo_toml_path)?;
@@ -702,7 +733,7 @@ fn generate_release_plan_markdown(root: &Path) -> Result<Option<String>> {
                 "| 📦 `{krate}` | `{current_version_str}` | `{new_version}` | `{bump_str}` |\n"
             ));
 
-            let summaries = crate_summaries.get(krate).cloned().unwrap_or_default();
+            let summaries = plan.crate_summaries.get(krate).cloned().unwrap_or_default();
             details_section.push_str(&format!(
                 "<details open>\n<summary><b>{krate}</b> (v{current_version_str} ➔ <code>v{new_version}</code>)</summary>\n\n"
             ));
@@ -718,7 +749,7 @@ fn generate_release_plan_markdown(root: &Path) -> Result<Option<String>> {
     md.push_str("### 📝 Details of Changes by Crate\n\n");
     md.push_str(&details_section);
     md.push_str("---\n\n");
-    md.push_str("> **Instruction for the Maintainer**: When performing the **Merge** of this PR into the `main` branch, the packages will be published on **Crates.io**, with the automatic creation of **Git Tags** and **GitHub Releases**.\n");
+    md.push_str("> 🚀 **Maintainer Note**: Merging this PR into `main` will publish the updated crates to **Crates.io**, creating **Git Tags** and **GitHub Releases**.\n");
 
     Ok(Some(md))
 }
@@ -729,7 +760,7 @@ fn run_plan(root: &Path, output: Option<PathBuf>) -> Result<()> {
         Some(md) => {
             if let Some(out_path) = output {
                 fs::write(&out_path, &md)?;
-                println!("Report generated: {}", out_path.display());
+                println!("✅ Release report saved to {}", out_path.display());
             } else {
                 println!("{md}");
             }
@@ -749,37 +780,46 @@ fn run_release_pr(root: &Path, base: &str) -> Result<()> {
         }
     };
 
-    println!("📄 Report generated successfully! Applying version bumps...");
+    println!("📄 Release report generated! Applying version bumps...");
 
-    run_bump(root, false)?;
+    if let Err(e) = run_bump(root, false) {
+        return Err(anyhow!("Failed during run_bump. Version bumps were not applied completely: {e}"));
+    }
 
     let pr_body_file = root.join(".changes_pr_body.md");
     fs::write(&pr_body_file, &body)?;
-    
+
     println!("\n✨ PR Body generated:\n");
     println!("{body}");
 
-    let pr_title = "Version Packages";
+    let pr_title = "📦 chore(release): version packages";
 
     let list_output = std::process::Command::new("gh")
-        .args(["pr", "list", "--base", base, "--json", "number,title", "--jq", ".[] | select(.title | contains(\"version packages\")) | .number"])
+        .args(["pr", "list", "--base", base, "--json", "number,title"])
         .output();
 
     if let Ok(out) = list_output {
-        let pr_num = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if !pr_num.is_empty() {
-            println!("Update release PR #{pr_num}...");
-            let edit_status = std::process::Command::new("gh")
-                .args(["pr", "edit", &pr_num, "--title", pr_title, "--body-file", pr_body_file.to_str().unwrap()])
-                .status();
-            let _ = fs::remove_file(&pr_body_file);
-            if edit_status.map_or(false, |s| s.success()) {
-                println!("🎉 Release PR updated successfully!");
-                return Ok(());
+        if let Ok(prs) = serde_json::from_slice::<Vec<serde_json::Value>>(&out.stdout) {
+            for pr in prs {
+                if let Some(title) = pr["title"].as_str() {
+                    if title.to_lowercase().contains("version packages") {
+                        if let Some(num) = pr["number"].as_u64() {
+                            let pr_num = num.to_string();
+                            println!("🔄 Updating existing Release PR #{pr_num}...");
+                            let edit_status = std::process::Command::new("gh")
+                                .args(["pr", "edit", &pr_num, "--title", pr_title, "--body-file", pr_body_file.to_str().unwrap()])
+                                .status();
+                            let _ = fs::remove_file(&pr_body_file);
+                            if edit_status.map_or(false, |s| s.success()) {
+                                println!("✅ Release PR #{pr_num} updated successfully!");
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
             }
         }
     }
-
 
     println!("🆕 Creating new Release PR on GitHub...");
     let create_status = std::process::Command::new("gh")
@@ -800,8 +840,29 @@ fn run_release_pr(root: &Path, base: &str) -> Result<()> {
     if create_status.map_or(false, |s| s.success()) {
         println!("🎉 Release PR created successfully!");
     } else {
-        println!("Files bumpeds in local.");
+        println!("⚠️ gh CLI call failed. Versions were already bumped in Cargo.toml and CHANGELOG.md files and .changes/ consumed. Please commit or push these changes manually.");
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_bump_type_apply() {
+        let v = Version::parse("0.1.0").unwrap();
+        assert_eq!(BumpType::Patch.apply(&v).to_string(), "0.1.1");
+        assert_eq!(BumpType::Minor.apply(&v).to_string(), "0.2.0");
+        assert_eq!(BumpType::Major.apply(&v).to_string(), "1.0.0");
+    }
+
+    #[test]
+    fn test_split_frontmatter() {
+        let input = "---\nfennec-runtime: minor\n---\n\n- Some change description";
+        let (front, body) = split_frontmatter(input).unwrap();
+        assert_eq!(front, "fennec-runtime: minor");
+        assert_eq!(body.trim(), "- Some change description");
+    }
 }

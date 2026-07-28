@@ -28,15 +28,18 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Run Bump and Update Versioning
-        run: cargo run -p xtask -- bump
+        run: cargo run --locked -p xtask -- bump
 
       - name: Commit and Push Version Updates
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           if [[ -n $(git status --porcelain) ]]; then
-            git add Cargo.toml crates/ .changes/
+            git add Cargo.toml Cargo.lock crates/ apps/ .changes/
             git commit -m "chore(release): bump crate versions and update changelogs [skip ci]"
             git push origin main
           else
@@ -49,8 +52,8 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
         run: |
           if [ -n "$CARGO_REGISTRY_TOKEN" ]; then
-            cargo run -p xtask -- publish --execute
+            cargo run --locked -p xtask -- publish --execute
           else
             echo "⚠️ CARGO_REGISTRY_TOKEN não configurado. Executando simulação de publicação e release..."
-            cargo run -p xtask -- publish --dry-run
+            cargo run --locked -p xtask -- publish --dry-run
           fi
