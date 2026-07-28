@@ -2,33 +2,27 @@ use fennec::*;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-struct RootView;
-
-impl Render for RootView {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .size_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(render_stack())
-    }
+#[derive(Default)]
+struct CounterState {
+    count: i32,
 }
 
 #[fennec::command]
-fn handle_click() {
-    println!("clicked!");
+fn handle_click(state: &mut CounterState, cx: &mut Context<CounterState>) {
+    state.count += 1;
+    println!("count: {}", state.count);
+    cx.notify();
 }
 
 fn main() {
     Application::new().run(|cx: &mut App| {
-        let bounds = Bounds::centered(None, size(px(400.), px(300.)), cx);
+        let bounds = Bounds::centered(None, size(px(400.), px(200.)), cx);
         cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 ..Default::default()
             },
-            |_, cx| cx.new(|_| RootView),
+            |_, cx| cx.new(|_| CounterState::default()),
         )
         .unwrap();
     });
