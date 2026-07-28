@@ -1,8 +1,0 @@
-[package]
-name = "fennec-core"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-pest = "2"
-pest_derive = "2"

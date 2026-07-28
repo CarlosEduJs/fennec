@@ -12,7 +12,7 @@ use walkdir::WalkDir;
 
 #[derive(Parser)]
 #[command(name = "xtask")]
-#[command(about = "Manage release crates and changes for Fennec workspace", long_about = None)]
+#[command(about = "Manage release crates and changes for fncc workspace", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -22,7 +22,7 @@ struct Cli {
 enum Commands {
     /// Add a new change declaration file in .changes/
     Change {
-        /// Crate name (e.g. fennec-runtime)
+        /// Crate name (e.g. fncc-runtime)
         #[arg(short, long)]
         krate: Option<String>,
         /// Bump level: patch, minor, major
@@ -665,7 +665,7 @@ fn run_publish(root: &Path, dry_run: bool, execute: bool) -> Result<()> {
     let available_crates = get_workspace_crates(root)?;
 
     // Define publication order based on dependency graph
-    let order = ["fennec-macros", "fennec-core", "fennec-runtime", "fennec"];
+    let order = ["fncc-macros", "fncc-core", "fncc-runtime", "fncc"];
 
     println!("Order of publication & releases:");
 
@@ -875,9 +875,9 @@ mod tests {
 
     #[test]
     fn test_split_frontmatter() {
-        let input = "---\nfennec-runtime: minor\n---\n\n- Some change description";
+        let input = "---\nfncc-runtime: minor\n---\n\n- Some change description";
         let (front, body) = split_frontmatter(input).unwrap();
-        assert_eq!(front, "fennec-runtime: minor");
+        assert_eq!(front, "fncc-runtime: minor");
         assert_eq!(body.trim(), "- Some change description");
     }
 }

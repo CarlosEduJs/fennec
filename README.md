@@ -1,24 +1,24 @@
-# Fennec 🦊
+# fncc 🦊
 
 > Like Astro → GPUI Native
 
-Fennec is a compiler/framework that translates a declarative syntax inspired by Astro into native Rust applications, using [GPUI](https://www.gpui.rs/) — the rendering engine behind Zed — as the runtime.
+fncc is a compiler/framework that translates a declarative syntax inspired by Astro into native Rust applications, using [GPUI](https://www.gpui.rs/) — the rendering engine behind Zed — as the runtime.
 
 Write UI with `.fui` files. Compile to a native binary. No Electron, no WebView, GPU-accelerated, low memory.
 
-> **Status:** POC complete. The basic pipeline works end-to-end. Not yet production-ready.
+> **Status:** POC complete. The basic pipeline works end-to-end.
 
 ---
 
-## Getting started (The final structure of an application using Fennec may change; this is only for testing the PoC.)
+## Getting started (The final structure of an application using fncc may change; this is only for testing the PoC.)
 
 ```toml
 # Cargo.toml
 [dependencies]
-fennec = "0.1"
+fncc = "0.1"
 
 [build-dependencies]
-fennec-core = "0.1"
+fncc-core = "0.1"
 ```
 
 ```rust
@@ -28,7 +28,7 @@ fn main() {
     let ui_dir = std::path::Path::new("src/ui");
     let out_dir = std::env::var("OUT_DIR").unwrap();
     let out_file = std::path::Path::new(&out_dir).join("generated.rs");
-    fennec_core::generate_all(ui_dir, &out_file);
+    fncc_core::generate_all(ui_dir, &out_file);
 }
 ```
 
@@ -45,7 +45,7 @@ fn main() {
 
 ```rust
 // main.rs
-use fennec::*;
+use fncc::*;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
@@ -54,7 +54,7 @@ struct CounterState {
     count: i32,
 }
 
-#[fennec::command]
+#[fncc::command]
 fn handle_click(state: &mut CounterState, cx: &mut Context<CounterState>) {
     state.count += 1;
     cx.notify();
@@ -73,11 +73,11 @@ fn main() {
 
 ```
 ┌─────────────┐     build.rs     ┌──────────────┐    include!()    ┌──────────┐
-│  App.fui    │ ───────────────→ │  fennec-core │ ──────────────→ │  main.rs │
+│  App.fui    │ ───────────────→ │  fncc-core   │ ──────────────→ │  main.rs │
 │  (declar.)  │   parse + codegen│  (crates/    │   generated.rs   │  (Rust)  │
 └─────────────┘                  └──────────────┘                  └──────────┘
                                                                         │
-                                                                   fennec  │
+                                                                    fncc    │
                                                                   runtime  │
                                                                  (GPUI)    │
                                                                         ▼
@@ -91,10 +91,10 @@ fn main() {
 
 | Crate | Purpose |
 |---|---|
-| `fennec-core` | Parser (`pest`) + codegen (AST → Rust+GPUI) |
-| `fennec-macros` | `#[fennec::command]` proc-macro (3 levels) |
-| `fennec-runtime` | Re-exports `gpui` + convenience wrappers |
-| `fennec` | Unified crate — `use fennec::*` + `#[fennec::command]` |
+| `fncc-core` | Parser (`pest`) + codegen (AST → Rust+GPUI) |
+| `fncc-macros` | `#[fncc::command]` proc-macro (3 levels) |
+| `fncc-runtime` | Re-exports `gpui` + convenience wrappers |
+| `fncc` | Unified crate — `use fncc::*` + `#[fncc::command]` |
 
 ## Command levels
 
@@ -104,7 +104,7 @@ fn main() {
 | 2 | `fn(&ClickEvent)` | Access GPUI click position, modifiers |
 | 3 | `fn(&mut State, &mut Context<State>)` | Mutate state + trigger re-render |
 
-The macro generates a **trampoline** (`__fennec_cmd_{name}`) that adapts the user's signature to what the codegen expects. This lets the build-script codegen call commands without knowing their signatures at generation time.
+The macro generates a **trampoline** (`__fncc_cmd_{name}`) that adapts the user's signature to what the codegen expects. This lets the build-script codegen call commands without knowing their signatures at generation time.
 
 ## Design principles
 
@@ -120,7 +120,7 @@ The macro generates a **trampoline** (`__fennec_cmd_{name}`) that adapts the use
 - [x] Parser (`pest` grammar — Stack, Text, Button, attributes, interpolation)
 - [x] Codegen (AST → GPUI Rust code)
 - [x] `build.rs` + `include!()` pipeline
-- [x] `#[fennec::command]` Level 1, 2, 3
+- [x] `#[fncc::command]` Level 1, 2, 3
 - [x] Explicit state with `cx.notify()` counter example
 - [x] Command trampoline system
 
@@ -138,7 +138,7 @@ The macro generates a **trampoline** (`__fennec_cmd_{name}`) that adapts the use
 | [Dioxus](https://dioxuslabs.com/) | JSX-like in Rust, targets native/web/mobile |
 | [Slint](https://slint.dev/) | Own DSL, compiles to native with GPU rendering |
 | [Tauri](https://tauri.app/) | Inspired the `#[command]` model |
-| [Zed](https://zed.dev/) / GPUI | The rendering engine Fennec targets |
+| [Zed](https://zed.dev/) / GPUI | The rendering engine fncc targets |
 
 ## License
 

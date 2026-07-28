@@ -1,10 +1,10 @@
 [workspace]
 resolver = "3"
 members = [
-    "crates/fennec-core",
-    "crates/fennec-macros",
-    "crates/fennec-runtime",
-    "crates/fennec",
-    "apps/example",
+    "crates/fncc-core",
+    "crates/fncc-macros",
+    "crates/fncc-runtime",
+    "crates/fncc",
+    "apps/example-app",
     "xtask",
 ]

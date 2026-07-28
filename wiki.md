@@ -1,4 +1,4 @@
-# Fennec 🦊
+# fncc 🦊
 
 > Like Astro → GPUI Native
 > A compiler/framework that translates a declarative syntax inspired by Astro into native Rust applications, using GPUI as the rendering engine.
@@ -7,7 +7,7 @@
 
 ## 1. Overview
 
-Fennec lets you write user interfaces with a syntax familiar to frontend developers (declarative components, separation of UI and logic, hot reload), compiling to a native binary — no Electron, no WebView, GPU-accelerated rendering, low memory footprint via [GPUI](https://www.gpui.rs/) (the framework powering Zed).
+fncc lets you write user interfaces with a syntax familiar to frontend developers (declarative components, separation of UI and logic, hot reload), compiling to a native binary — no Electron, no WebView, GPU-accelerated rendering, low memory footprint via [GPUI](https://www.gpui.rs/) (the framework powering Zed).
 
 ### Developer experience goals
 - Declarative components, `.fui`-like syntax
@@ -62,7 +62,7 @@ impl Render for CounterState {
                         let handle = handle.clone();
                         move |_, _, cx| {
                             handle.update(cx, |this, cx| {
-                                __fennec_cmd_handle_click(this, cx);
+                                __fncc_cmd_handle_click(this, cx);
                             }).ok();
                         }
                     })
@@ -79,7 +79,7 @@ struct CounterState {
     count: i32,
 }
 
-#[fennec::command]
+#[fncc::command]
 fn handle_click(state: &mut CounterState, cx: &mut Context<CounterState>) {
     state.count += 1;
     cx.notify();
@@ -91,22 +91,22 @@ fn handle_click(state: &mut CounterState, cx: &mut Context<CounterState>) {
 ## 3. Project structure
 
 ```
-fennec/
+fncc/
 ├── crates/
-│   ├── fennec-core/          # Parser (pest) + Codegen
+│   ├── fncc-core/          # Parser (pest) + Codegen
 │   │   ├── src/
 │   │   │   ├── parser.rs     # pest grammar → AST
 │   │   │   ├── codegen.rs    # AST → Rust+GPUI source
 │   │   │   └── config.rs     # fncc.config.toml parsing
 │   │   └── Cargo.toml
 │   │
-│   ├── fennec-macros/        # proc-macro crate
-│   │   └── src/lib.rs        # #[fennec::command]
+│   ├── fncc-macros/        # proc-macro crate
+│   │   └── src/lib.rs        # #[fncc::command]
 │   │
-│   ├── fennec-runtime/       # Runtime re-exports (gpui + helpers)
+│   ├── fncc-runtime/       # Runtime re-exports (gpui + helpers)
 │   │   └── src/lib.rs        # pub use gpui::* + convenience wrappers
 │   │
-│   └── fennec/               # Unified crate: use fennec::*
+│   └── fncc/               # Unified crate: use fncc::*
 │       └── src/lib.rs        # Re-exports macros + runtime
 │
 ├── apps/
@@ -115,7 +115,7 @@ fennec/
 │       │   ├── ui/
 │       │   │   └── App.fui
 │       │   └── main.rs
-│       ├── build.rs           # calls fennec_core::generate_all()
+│       ├── build.rs           # calls fncc_core::generate_all()
 │       └── Cargo.toml
 │
 ├── Cargo.toml                 # Workspace root
@@ -158,18 +158,18 @@ use crate::some_import;
 
 This is a pragmatic concession for the POC. A future version may infer the state type from the command signatures instead.
 
-### 4.2 Commands via macro (`#[fennec::command]`)
+### 4.2 Commands via macro (`#[fncc::command]`)
 
 Inspired by Tauri's `#[tauri::command]`. Functions handling UI events are explicitly marked:
 
 ```rust
-#[fennec::command]
+#[fncc::command]
 pub fn handle_click() {
     println!("clicked!");
 }
 ```
 
-The macro generates a **trampoline function** (`__fennec_cmd_{name}`) that adapts the user's function signature to match the GPUI handler the codegen expects. The trampoline name is deterministic, so the codegen can reference it without knowing the signature.
+The macro generates a **trampoline function** (`__fncc_cmd_{name}`) that adapts the user's function signature to match the GPUI handler the codegen expects. The trampoline name is deterministic, so the codegen can reference it without knowing the signature.
 
 ```fui
 <Button onclick="handle_click">Click here</Button>
@@ -181,7 +181,7 @@ The macro generates a **trampoline function** (`__fennec_cmd_{name}`) that adapt
 
 **Level 1 — No argument:**
 ```rust
-#[fennec::command]
+#[fncc::command]
 pub fn handle_click() {
     println!("clicked!");
 }
@@ -190,7 +190,7 @@ Macro generates a trampoline that matches GPUI's `on_click` handler signature `(
 
 **Level 2 — Native GPUI event:**
 ```rust
-#[fennec::command]
+#[fncc::command]
 pub fn handle_click(event: &ClickEvent) {
     println!("clicked at {:?}", event.position());
 }
@@ -199,7 +199,7 @@ Macro inspects the function signature via `syn` and generates a trampoline that 
 
 **Level 3 — State + context (explicit reactivity):**
 ```rust
-#[fennec::command]
+#[fncc::command]
 pub fn handle_click(state: &mut CounterState, cx: &mut Context<CounterState>) {
     state.count += 1;
     cx.notify(); // developer decides when to notify — no magic
@@ -217,15 +217,15 @@ Compared to alternatives:
 - **`proc_macro`** (compile-time macro): harder to debug, couples codegen to the Rustc compilation pipeline.
 - **External CLI tool** (`fncc build`): better for DX but adds a build step outside Cargo.
 
-The hybrid approach gives us fast iteration during the POC while keeping the Cargo-native workflow. A dedicated CLI (`fncc build`) can be built later on top of `fennec-core`.
+The hybrid approach gives us fast iteration during the POC while keeping the Cargo-native workflow. A dedicated CLI (`fncc build`) can be built later on top of `fncc-core`.
 
 ### 4.5 Reactivity: explicit, not implicit
 
-**Decision:** Fennec uses explicit reactivity — the developer calls `cx.notify()` manually. No implicit "variable changed → UI updates" magic.
+**Decision:** fncc uses explicit reactivity — the developer calls `cx.notify()` manually. No implicit "variable changed → UI updates" magic.
 
-**Reason:** debuggability. Implicit reactivity is great on day one but becomes a nightmare to debug in larger apps ("why did this component re-render?"). This is aligned with the Fennec target audience: developers willing to trade "easy" for "predictable and native."
+**Reason:** debuggability. Implicit reactivity is great on day one but becomes a nightmare to debug in larger apps ("why did this component re-render?"). This is aligned with the fncc target audience: developers willing to trade "easy" for "predictable and native."
 
-**Positive consequence:** Fennec doesn't need to invent a reactivity system. GPUI's `Model`/`View` + `cx.notify()` already delivers this behavior. The compiler's job is only to generate the right call in the right place.
+**Positive consequence:** fncc doesn't need to invent a reactivity system. GPUI's `Model`/`View` + `cx.notify()` already delivers this behavior. The compiler's job is only to generate the right call in the right place.
 
 Interpolation like `{state.count}` in markup is lowered at **compile-time**: code generation emits `format!("{}", self.count)` into the `render` method, while `self.count` is evaluated at runtime during rendering and recomputed after `cx.notify()` triggers a re-render.
 
@@ -273,7 +273,7 @@ use crate::lib::{CounterState, handle_click};
 [paths]
 ui = "src/ui"
 lib = "src"
-output = "target/fennec"
+output = "target/fncc"
 
 [app]
 entry = "src/ui/App.fui"
@@ -295,8 +295,8 @@ watch = ["src/ui", "src"]
 
 - **Dioxus** — JSX-like in Rust macros, targets native/web/mobile. Closest spiritual competitor.
 - **Slint** — Own declarative DSL, compiles to native with GPU rendering.
-- **Tauri** — the `#[tauri::command]` + `invoke()` model that inspired Fennec's command system (and shares the same fragility: a string-based bridge without type-checking).
-- **Zed / GPUI** — GPUI used internally with pure Rust, no DSL. Fennec is the first declarative syntax layer on top of it.
+- **Tauri** — the `#[tauri::command]` + `invoke()` model that inspired fncc's command system (and shares the same fragility: a string-based bridge without type-checking).
+- **Zed / GPUI** — GPUI used internally with pure Rust, no DSL. fncc is the first declarative syntax layer on top of it.
 
 ---
 
@@ -307,7 +307,7 @@ watch = ["src/ui", "src"]
 2. Hand-translate `.fui` → Rust+GPUI to validate GPUI API
 3. Write parser using `pest`
 4. Automate parser → codegen via `build.rs` + `include!()`
-5. `#[fennec::command]` Level 1 (no args) and Level 2 (GPUI event)
+5. `#[fncc::command]` Level 1 (no args) and Level 2 (GPUI event)
 6. Explicit state (Level 3) with counter + `cx.notify()`
 7. Command trampoline system (macro generates adapter, codegen calls it by name)
 
@@ -322,4 +322,4 @@ watch = ["src/ui", "src"]
 - **Hot reload in compiled Rust:** candidates — `hot-lib-reloader` (dylib reload) for dev, or fast recompile + restart with incremental compilation.
 - **Imports for `.fui` components:** `use`-style (Rust) vs. file-path (Astro) — still undecided.
 - **`@state` directive** breaks the "frontmatter is pure Rust" rule — needs a better solution post-POC.
-- **GPUI version lock:** the runtime pins a specific GPUI version (currently 0.2.2). GPUI is still evolving rapidly; breaking changes from upstream require manual updates to `fennec-runtime`.
+- **GPUI version lock:** the runtime pins a specific GPUI version (currently 0.2.2). GPUI is still evolving rapidly; breaking changes from upstream require manual updates to `fncc-runtime`.
