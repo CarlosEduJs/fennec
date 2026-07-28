@@ -440,7 +440,6 @@ mod tests {
     fn test_regression_gap_with_decimal_does_not_produce_invalid_syntax() {
         let out = generate_from("<Stack gap=\"12.5\"></Stack>");
         assert!(out.contains(".gap(px(12.5))") || out.contains(".gap(px(12.5.))"));
-        // BUG: currently produces `px(12.5.)` which is invalid Rust
     }
 
     #[test]
