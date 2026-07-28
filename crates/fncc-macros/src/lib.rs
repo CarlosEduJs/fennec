@@ -135,3 +135,127 @@ fn is_unit(ty: &Type) -> bool {
         _ => false,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use syn::parse_quote;
+
+    // --- extract_param_type ---
+
+    #[test]
+    fn test_extract_param_type_from_typed_arg() {
+        let arg: FnArg = parse_quote!(_: &ClickEvent);
+        let ty = extract_param_type(&arg);
+        assert!(
+            matches!(&ty, Type::Reference(TypeReference { elem, .. }) if matches!(elem.as_ref(), Type::Path(p) if p.qself.is_none() && p.path.is_ident("ClickEvent")))
+        );
+    }
+
+    #[test]
+    fn test_extract_param_type_from_mut_ref() {
+        let arg: FnArg = parse_quote!(_: &mut CounterState);
+        let ty = extract_param_type(&arg);
+        assert!(
+            matches!(&ty, Type::Reference(TypeReference { elem, .. }) if matches!(elem.as_ref(), Type::Path(p) if p.qself.is_none() && p.path.is_ident("CounterState")))
+        );
+    }
+
+    #[test]
+    fn test_extract_param_type_from_self_receiver() {
+        let arg: FnArg = parse_quote!(self);
+        let ty = extract_param_type(&arg);
+        assert!(matches!(&ty, Type::Path(p) if p.qself.is_none() && p.path.is_ident("Self")));
+    }
+
+    #[test]
+    fn test_extract_param_type_from_value_type() {
+        let arg: FnArg = parse_quote!(x: i32);
+        let ty = extract_param_type(&arg);
+        assert!(matches!(&ty, Type::Path(p) if p.qself.is_none() && p.path.is_ident("i32")));
+    }
+
+    // --- extract_state_type ---
+
+    #[test]
+    fn test_extract_state_type_from_mut_ref() {
+        let inputs: syn::punctuated::Punctuated<FnArg, syn::Token![,]> =
+            parse_quote!(_: &mut CounterState, cx: &mut Context<CounterState>);
+        let ty = extract_state_type(&inputs);
+        assert!(matches!(&ty, Type::Path(p) if p.qself.is_none() && p.path.is_ident("CounterState")));
+    }
+
+    #[test]
+    fn test_extract_state_type_from_non_ref() {
+        let inputs: syn::punctuated::Punctuated<FnArg, syn::Token![,]> =
+            parse_quote!(state: CounterState, cx: &mut Context<CounterState>);
+        let ty = extract_state_type(&inputs);
+        assert!(matches!(&ty, Type::Path(p) if p.qself.is_none() && p.path.is_ident("CounterState")));
+    }
+
+    #[test]
+    fn test_extract_state_type_from_empty_inputs_returns_self() {
+        let inputs: syn::punctuated::Punctuated<FnArg, syn::Token![,]> = parse_quote!();
+        let ty = extract_state_type(&inputs);
+        assert!(matches!(&ty, Type::Path(p) if p.qself.is_none() && p.path.is_ident("Self")));
+    }
+
+    // --- is_unit ---
+
+    #[test]
+    fn test_is_unit_returns_true_for_empty_tuple() {
+        let ty: Type = parse_quote!(());
+        assert!(is_unit(&ty));
+    }
+
+    #[test]
+    fn test_is_unit_returns_false_for_non_empty_tuple() {
+        let ty: Type = parse_quote!((i32,));
+        assert!(!is_unit(&ty));
+    }
+
+    #[test]
+    fn test_is_unit_returns_false_for_other_types() {
+        let ty: Type = parse_quote!(i32);
+        assert!(!is_unit(&ty));
+    }
+
+    #[test]
+    fn test_is_unit_returns_false_for_struct_type() {
+        let ty: Type = parse_quote!(MyStruct);
+        assert!(!is_unit(&ty));
+    }
+
+    // --- arg_count validation (contract) ---
+
+    #[test]
+    fn test_command_level_0_accepts_zero_args() {
+        let item: ItemFn = parse_quote!(
+            fn do_something() {
+                println!("done");
+            }
+        );
+        assert!(item.sig.inputs.is_empty());
+        assert_eq!(item.sig.inputs.len(), 0);
+    }
+
+    #[test]
+    fn test_command_level_2_accepts_one_arg() {
+        let item: ItemFn = parse_quote!(
+            fn handle_click(event: &ClickEvent) {
+                let _ = event;
+            }
+        );
+        assert_eq!(item.sig.inputs.len(), 1);
+    }
+
+    #[test]
+    fn test_command_level_3_accepts_two_args() {
+        let item: ItemFn = parse_quote!(
+            fn update(state: &mut AppState, cx: &mut Context<AppState>) {
+                let _ = (state, cx);
+            }
+        );
+        assert_eq!(item.sig.inputs.len(), 2);
+    }
+}
