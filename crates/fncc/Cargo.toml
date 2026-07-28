@@ -2,6 +2,10 @@
 name = "fncc"
 version = "0.1.0"
 edition = "2024"
+description = "Unified native UI framework — re-exports fncc-macros and fncc-runtime for convenience"
+license = "Apache-2.0"
+repository = "https://github.com/carlosedujs/fncc"
+homepage = "https://github.com/carlosedujs/fncc"
 
 [dependencies]
 fncc-macros = { path = "../fncc-macros", version = "0.1.0" }

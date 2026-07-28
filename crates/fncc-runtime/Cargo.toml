@@ -2,6 +2,10 @@
 name = "fncc-runtime"
 version = "0.1.0"
 edition = "2024"
+description = "Runtime re-exports and convenience wrappers for the fncc native UI framework"
+license = "Apache-2.0"
+repository = "https://github.com/carlosedujs/fncc"
+homepage = "https://github.com/carlosedujs/fncc"
 
 [dependencies]
 gpui = "0.2.2"

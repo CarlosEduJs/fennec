@@ -2,6 +2,10 @@
 name = "fncc-core"
 version = "0.1.0"
 edition = "2024"
+description = "Parser and codegen for the fncc native UI framework — compiles .fui files to GPUI Rust code"
+license = "Apache-2.0"
+repository = "https://github.com/carlosedujs/fncc"
+homepage = "https://github.com/carlosedujs/fncc"
 
 [dependencies]
 pest = "2"
