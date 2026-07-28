@@ -1,0 +1,8 @@
+[package]
+name = "fennec"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+fennec-macros = { path = "../fennec-macros" }
+fennec-runtime = { path = "../fennec-runtime" }

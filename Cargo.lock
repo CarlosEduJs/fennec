@@ -1611,6 +1611,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "fennec"
+version = "0.1.0"
+dependencies = [
+ "fennec-macros",
+ "fennec-runtime",
+]
+
+[[package]]
 name = "fennec-core"
 version = "0.1.0"
 dependencies = [
@@ -1622,13 +1630,17 @@ dependencies = [
 name = "fennec-example"
 version = "0.1.0"
 dependencies = [
+ "fennec",
  "fennec-core",
- "fennec-runtime",
 ]
 
 [[package]]
 name = "fennec-macros"
 version = "0.1.0"
+dependencies = [
+ "quote",
+ "syn 2.0.119",
+]
 
 [[package]]
 name = "fennec-runtime"

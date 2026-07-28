@@ -4,5 +4,6 @@ members = [
     "crates/fennec-core",
     "crates/fennec-macros",
     "crates/fennec-runtime",
+    "crates/fennec",
     "apps/example",
 ]
