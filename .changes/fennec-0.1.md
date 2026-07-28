@@ -1,0 +1,6 @@
+---
+fennec: minor
+---
+
+- Umbrella crate that re-exports `fennec-macros` and `fennec-runtime` for convenience.
+- Enables usage via `use fennec::*` instead of separate dependencies.

@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   release:
-    name: Release & Publish Crates
+    name: Release Pipeline (PR or Publish)
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -31,22 +31,39 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Run Bump and Update Versioning
-        run: cargo run --locked -p xtask -- bump
+      - name: Check for pending changesets in .changes/
+        id: check_changes
+        run: |
+          CHANGES_COUNT=$(find .changes -maxdepth 1 -name "*.md" ! -name "README.md" ! -name ".*" 2>/dev/null | wc -l)
+          echo "count=$CHANGES_COUNT" >> $GITHUB_OUTPUT
+          echo "Found $CHANGES_COUNT pending change file(s)."
 
-      - name: Commit and Push Version Updates
+      - name: Create or Update Release PR
+        if: steps.check_changes.outputs.count > 0
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          # Create and switch to dedicated release branch
+          git checkout -B chore/release-packages
+          
+          # Apply version bumps and update changelogs via xtask
+          cargo run --locked -p xtask -- bump
+          
+          # Commit and push release branch
           if [[ -n $(git status --porcelain) ]]; then
             git add Cargo.toml Cargo.lock crates/ apps/ .changes/
-            git commit -m "chore(release): bump crate versions and update changelogs [skip ci]"
-            git push origin main
-          else
-            echo "Nenhuma alteração de versão para commitar."
+            git commit -m "chore(release): version packages"
+            git push origin chore/release-packages --force
           fi
+          
+          # Open or update GitHub Pull Request targeting main
+          cargo run --locked -p xtask -- release-pr
 
       - name: Publish to Crates.io, Tag & Create GitHub Releases
+        if: steps.check_changes.outputs.count == 0
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
           GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}

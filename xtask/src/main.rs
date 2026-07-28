@@ -780,12 +780,6 @@ fn run_release_pr(root: &Path, base: &str) -> Result<()> {
         }
     };
 
-    println!("📄 Release report generated! Applying version bumps...");
-
-    if let Err(e) = run_bump(root, false) {
-        return Err(anyhow!("Failed during run_bump. Version bumps were not applied completely: {e}"));
-    }
-
     let pr_body_file = root.join(".changes_pr_body.md");
     fs::write(&pr_body_file, &body)?;
 
@@ -793,28 +787,25 @@ fn run_release_pr(root: &Path, base: &str) -> Result<()> {
     println!("{body}");
 
     let pr_title = "📦 chore(release): version packages";
+    let head_branch = "chore/release-packages";
 
     let list_output = std::process::Command::new("gh")
-        .args(["pr", "list", "--base", base, "--json", "number,title"])
+        .args(["pr", "list", "--base", base, "--head", head_branch, "--json", "number,title"])
         .output();
 
     if let Ok(out) = list_output {
         if let Ok(prs) = serde_json::from_slice::<Vec<serde_json::Value>>(&out.stdout) {
-            for pr in prs {
-                if let Some(title) = pr["title"].as_str() {
-                    if title.to_lowercase().contains("version packages") {
-                        if let Some(num) = pr["number"].as_u64() {
-                            let pr_num = num.to_string();
-                            println!("🔄 Updating existing Release PR #{pr_num}...");
-                            let edit_status = std::process::Command::new("gh")
-                                .args(["pr", "edit", &pr_num, "--title", pr_title, "--body-file", pr_body_file.to_str().unwrap()])
-                                .status();
-                            let _ = fs::remove_file(&pr_body_file);
-                            if edit_status.map_or(false, |s| s.success()) {
-                                println!("✅ Release PR #{pr_num} updated successfully!");
-                                return Ok(());
-                            }
-                        }
+            if let Some(pr) = prs.first() {
+                if let Some(num) = pr["number"].as_u64() {
+                    let pr_num = num.to_string();
+                    println!("🔄 Updating existing Release PR #{pr_num}...");
+                    let edit_status = std::process::Command::new("gh")
+                        .args(["pr", "edit", &pr_num, "--title", pr_title, "--body-file", pr_body_file.to_str().unwrap()])
+                        .status();
+                    let _ = fs::remove_file(&pr_body_file);
+                    if edit_status.map_or(false, |s| s.success()) {
+                        println!("✅ Release PR #{pr_num} updated successfully!");
+                        return Ok(());
                     }
                 }
             }
@@ -832,6 +823,8 @@ fn run_release_pr(root: &Path, base: &str) -> Result<()> {
             pr_body_file.to_str().unwrap(),
             "--base",
             base,
+            "--head",
+            head_branch,
         ])
         .status();
 
@@ -840,7 +833,7 @@ fn run_release_pr(root: &Path, base: &str) -> Result<()> {
     if create_status.map_or(false, |s| s.success()) {
         println!("🎉 Release PR created successfully!");
     } else {
-        println!("⚠️ gh CLI call failed. Versions were already bumped in Cargo.toml and CHANGELOG.md files and .changes/ consumed. Please commit or push these changes manually.");
+        println!("⚠️ gh CLI call failed. Ensure branch '{head_branch}' is pushed to remote and gh CLI is authorized.");
     }
 
     Ok(())
