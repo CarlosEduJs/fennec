@@ -1,11 +1,26 @@
 use crate::parser::{AttrValue, Document, Element, Node};
 
+/// Counter for unique names across files in a single generation pass.
+static FILE_COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 pub fn generate(doc: &Document) -> String {
     let mut out = String::new();
+    let file_id = FILE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
     if let Some(ref fm) = doc.frontmatter {
         out.push_str(fm);
         out.push('\n');
+    }
+
+    // emit compile-time validation for each referenced command
+    let commands = collect_commands(&doc.root);
+    if !commands.is_empty() {
+        out.push_str("#[allow(unused)]\n");
+        out.push_str(&format!("fn _fennec_validate_{file_id}() {{\n"));
+        for cmd in &commands {
+            out.push_str(&format!("    let _: fn() = {cmd};\n"));
+        }
+        out.push_str("}\n\n");
     }
 
     let fn_name = format!("render_{}", to_snake_case(&doc.root.name));
@@ -15,6 +30,25 @@ pub fn generate(doc: &Document) -> String {
     out.push_str("}\n");
 
     out
+}
+
+fn collect_commands(el: &Element) -> Vec<String> {
+    let mut cmds = Vec::new();
+    for (key, val) in &el.attrs {
+        if key == "onclick" {
+            if let AttrValue::String(name) = val {
+                if !cmds.contains(name) {
+                    cmds.push(name.clone());
+                }
+            }
+        }
+    }
+    for child in &el.children {
+        if let Node::Element(child_el) = child {
+            cmds.extend(collect_commands(child_el));
+        }
+    }
+    cmds
 }
 
 fn generate_element(el: &Element, depth: usize) -> String {

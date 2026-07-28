@@ -1,4 +1,4 @@
-use fennec_runtime::*;
+use fennec::*;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
@@ -15,6 +15,7 @@ impl Render for RootView {
     }
 }
 
+#[fennec::command]
 fn handle_click() {
     println!("clicked!");
 }
