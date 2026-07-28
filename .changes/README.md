@@ -1,6 +1,6 @@
 # Gerenciamento de Mudanças (.changes/)
 
-Este diretório contém os arquivos de declaração de mudança de versão para os crates do **Fennec**.
+Este diretório contém os arquivos de declaração de mudança de versão para os crates do **fncc**.
 
 ## Como adicionar uma mudança num Pull Request:
 
@@ -14,8 +14,8 @@ Ou criar manualmente um arquivo `.md` neste diretório (ex: `.changes/minha-feat
 
 ```markdown
 ---
-fennec-runtime: minor
-fennec: patch
+fncc-runtime: minor
+fncc: patch
 ---
 
 - Descrição da nova funcionalidade ou correção para o CHANGELOG.
