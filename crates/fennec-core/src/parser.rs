@@ -9,6 +9,7 @@ use pest::iterators::Pair;
 #[derive(Debug, Clone, PartialEq)]
 pub struct Document {
     pub frontmatter: Option<String>,
+    pub state_type: Option<String>,
     pub root: Element,
 }
 
@@ -39,6 +40,7 @@ pub fn parse(source: &str) -> Result<Document, String> {
     let pair = pairs.next().expect("document should exist");
 
     let mut frontmatter = None;
+    let mut state_type = None;
     let mut root = None;
 
     for inner in pair.into_inner() {
@@ -49,7 +51,23 @@ pub fn parse(source: &str) -> Result<Document, String> {
                     .strip_prefix("---")
                     .and_then(|s| s.strip_suffix("---"))
                     .map(|s| s.trim().to_string());
-                frontmatter = content;
+
+                if let Some(ref raw) = content {
+                    // extract @state directive
+                    let mut clean_lines = Vec::new();
+                    for line in raw.lines() {
+                        let trimmed = line.trim();
+                        if let Some(st) = trimmed.strip_prefix("@state ") {
+                            state_type = Some(st.trim().to_string());
+                        } else {
+                            clean_lines.push(line);
+                        }
+                    }
+                    let clean = clean_lines.join("\n");
+                    if !clean.trim().is_empty() {
+                        frontmatter = Some(clean);
+                    }
+                }
             }
             Rule::element => {
                 root = Some(parse_element(inner));
@@ -60,6 +78,7 @@ pub fn parse(source: &str) -> Result<Document, String> {
 
     Ok(Document {
         frontmatter,
+        state_type,
         root: root.expect("document must have a root element"),
     })
 }

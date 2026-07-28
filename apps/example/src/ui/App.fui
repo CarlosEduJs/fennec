@@ -1,5 +1,8 @@
+---
+@state CounterState
+---
+
 <Stack direction="vertical" gap="12">
-    <Text size="xl">Hello World</Text>
-    <Text>This is Fennec 🦊</Text>
-    <Button onclick="handle_click">Click here</Button>
+    <Text size="xl">Contador: {state.count}</Text>
+    <Button onclick="handle_click">+1</Button>
 </Stack>
