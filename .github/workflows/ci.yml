@@ -49,7 +49,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Install taplo
-        uses: uncenter/install-action@taplo
+        run: cargo install taplo-cli --locked
 
       - name: Check TOML formatting
         run: taplo format --check
