@@ -797,6 +797,12 @@ fn run_release_pr(root: &Path, base: &str) -> Result<()> {
         }
     };
 
+    println!("📄 Release report generated! Applying version bumps...");
+
+    if let Err(e) = run_bump(root, false) {
+        return Err(anyhow!("Failed during run_bump. Version bumps were not applied completely: {e}"));
+    }
+
     let pr_body_file = root.join(".changes_pr_body.md");
     fs::write(&pr_body_file, &body)?;
 
@@ -845,12 +851,11 @@ fn run_release_pr(root: &Path, base: &str) -> Result<()> {
         ])
         .status();
 
-    let _ = fs::remove_file(&pr_body_file);
-
     if create_status.map_or(false, |s| s.success()) {
+        let _ = fs::remove_file(&pr_body_file);
         println!("🎉 Release PR created successfully!");
     } else {
-        println!("⚠️ gh CLI call failed. Ensure branch '{head_branch}' is pushed to remote and gh CLI is authorized.");
+        println!("ℹ️ PR body saved in .changes_pr_body.md. Will be published after git push.");
     }
 
     Ok(())

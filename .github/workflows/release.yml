@@ -49,18 +49,31 @@ jobs:
           # Create and switch to dedicated release branch
           git checkout -B chore/release-packages
           
-          # Apply version bumps and update changelogs via xtask
-          cargo run -p xtask -- bump
+          # Generate PR report while .changes/ files exist AND apply version bumps
+          cargo run -p xtask -- release-pr
           
-          # Commit and push release branch
+          # Commit and push release branch with version updates and changelogs
           if [[ -n $(git status --porcelain) ]]; then
             git add Cargo.toml Cargo.lock crates/ apps/ .changes/
             git commit -m "chore(release): version packages"
             git push origin chore/release-packages --force
           fi
           
-          # Open or update GitHub Pull Request targeting main
-          cargo run -p xtask -- release-pr
+          # Ensure GitHub Pull Request exists and body is set from .changes_pr_body.md
+          PR_TITLE="📦 chore(release): version packages"
+          PR_BODY_FILE=".changes_pr_body.md"
+          
+          if [ -f "$PR_BODY_FILE" ]; then
+            PR_NUM=$(gh pr list --base main --head chore/release-packages --json number -q '.[0].number')
+            if [ -n "$PR_NUM" ]; then
+              echo "🔄 Updating existing Release PR #$PR_NUM..."
+              gh pr edit "$PR_NUM" --title "$PR_TITLE" --body-file "$PR_BODY_FILE"
+            else
+              echo "🆕 Creating new Release PR..."
+              gh pr create --title "$PR_TITLE" --body-file "$PR_BODY_FILE" --base main --head chore/release-packages
+            fi
+            rm -f "$PR_BODY_FILE"
+          fi
 
       - name: Publish to Crates.io, Tag & Create GitHub Releases
         if: steps.check_changes.outputs.count == 0
