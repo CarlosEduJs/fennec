@@ -1,3 +1,9 @@
 # Changelog - fncc-runtime
 
 All notable changes to `fncc-runtime` crate will be documented in this file.
+## [0.2.0] - 2026-07-28
+
+- Full re-export of `gpui` and its prelude for convenient access.
+- `stack()` — flex column component (`div().flex().flex_col()`).
+- `h_stack()` — flex row component (`div().flex()`).
+
