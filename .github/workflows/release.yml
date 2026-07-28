@@ -50,7 +50,7 @@ jobs:
           git checkout -B chore/release-packages
           
           # Apply version bumps and update changelogs via xtask
-          cargo run --locked -p xtask -- bump
+          cargo run -p xtask -- bump
           
           # Commit and push release branch
           if [[ -n $(git status --porcelain) ]]; then
@@ -60,7 +60,7 @@ jobs:
           fi
           
           # Open or update GitHub Pull Request targeting main
-          cargo run --locked -p xtask -- release-pr
+          cargo run -p xtask -- release-pr
 
       - name: Publish to Crates.io, Tag & Create GitHub Releases
         if: steps.check_changes.outputs.count == 0

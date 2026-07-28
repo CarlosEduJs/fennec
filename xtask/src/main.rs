@@ -519,6 +519,13 @@ fn run_bump(root: &Path, dry_run: bool) -> Result<()> {
     }
 
     if !dry_run {
+        println!("🔄 Refreshing Cargo.lock to match updated crate versions...");
+        let _ = std::process::Command::new("cargo")
+            .arg("check")
+            .arg("--workspace")
+            .current_dir(root)
+            .status();
+
         for cf in &plan.change_files {
             fs::remove_file(&cf.path)?;
         }
