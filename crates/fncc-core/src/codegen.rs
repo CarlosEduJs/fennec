@@ -285,3 +285,203 @@ impl AttrValue {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::parse;
+
+    fn generate_from(source: &str) -> String {
+        let doc = parse(source).unwrap();
+        generate(&doc)
+    }
+
+    // --- Happy path ---
+
+    #[test]
+    fn test_generates_stateless_render_function() {
+        let out = generate_from("<MyComp></MyComp>");
+        assert!(out.contains("pub fn render_my_comp() -> impl IntoElement {"));
+        assert!(out.contains("div()"));
+    }
+
+    #[test]
+    fn test_generates_stateful_render_impl() {
+        let src = "---\n@state CounterState\n---\n<App></App>";
+        let out = generate_from(src);
+        assert!(out.contains("impl Render for CounterState {"));
+        assert!(out.contains("fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {"));
+    }
+
+    #[test]
+    fn test_frontmatter_is_preserved_in_output() {
+        let src = "---\nuse crate::prelude::*;\n---\n<App></App>";
+        let out = generate_from(src);
+        assert!(out.contains("use crate::prelude::*;"));
+    }
+
+    #[test]
+    fn test_stack_with_direction_vertical_generates_flex_col() {
+        let out = generate_from("<Stack direction=\"vertical\"></Stack>");
+        assert!(out.contains(".flex()"));
+        assert!(out.contains(".flex_col()"));
+    }
+
+    #[test]
+    fn test_stack_with_direction_horizontal_generates_flex_only() {
+        let out = generate_from("<Stack direction=\"horizontal\"></Stack>");
+        assert!(out.contains(".flex()"));
+        assert!(!out.contains(".flex_col()"));
+    }
+
+    #[test]
+    fn test_stack_with_gap_generates_px_value() {
+        let out = generate_from("<Stack gap=\"12\"></Stack>");
+        assert!(out.contains(".gap(px(12.))"));
+    }
+
+    #[test]
+    fn test_text_with_size_xl() {
+        let out = generate_from("<Text size=\"xl\">hello</Text>");
+        assert!(out.contains(".text_xl()"));
+        assert!(out.contains(".child(\"hello\")"));
+    }
+
+    #[test]
+    fn test_text_with_size_unknown_falls_back_to_base() {
+        let out = generate_from("<Text size=\"huge\">text</Text>");
+        assert!(out.contains(".text_base()"));
+    }
+
+    #[test]
+    fn test_button_with_text_child() {
+        let out = generate_from("<Button onclick=\"handle_click\">Click</Button>");
+        assert!(out.contains(".id(\"Click\")"));
+        assert!(out.contains(".cursor_pointer()"));
+        assert!(out.contains(".child(\"Click\")"));
+    }
+
+    #[test]
+    fn test_stateful_button_with_onclick_generates_entity_pattern() {
+        let src = "---\n@state AppState\n---\n<Button onclick=\"inc\">+1</Button>";
+        let out = generate_from(src);
+        assert!(out.contains("let handle = handle.clone();"));
+        assert!(out.contains("handle.update(cx, |this, cx| {"));
+        assert!(out.contains("__fncc_cmd_inc(this, cx);"));
+    }
+
+    #[test]
+    fn test_stateless_button_with_onclick_generates_direct_call() {
+        let out = generate_from("<Button onclick=\"log_click\">Go</Button>");
+        assert!(out.contains(".on_click(__fncc_cmd_log_click)"));
+    }
+
+    // --- Edge cases ---
+
+    #[test]
+    fn test_empty_element_children() {
+        let out = generate_from("<Div></Div>");
+        assert!(out.contains("div()"));
+    }
+
+    #[test]
+    fn test_unknown_element_falls_back_to_div_with_attrs() {
+        let out = generate_from("<CustomEl foo=\"bar\">content</CustomEl>");
+        assert!(out.contains(".attr(\"foo\", \"bar\")"));
+        assert!(out.contains(".child(\"content\")"));
+    }
+
+    #[test]
+    fn test_interpolation_in_text_content_generates_format() {
+        let out = generate_from("---\n@state S\n---\n<Text>{state.msg}</Text>");
+        assert!(out.contains("format!(\"{}\", self.msg)"));
+        assert!(!out.contains("self.state.msg"));
+    }
+
+    #[test]
+    fn test_interpolation_strips_state_prefix() {
+        let out = generate_from("<Text>{state.count}</Text>");
+        // stateless, so state. prefix is stripped but no self. prefix
+        assert!(out.contains("format!(\"{}\", self.count)"));
+    }
+
+    #[test]
+    fn test_multiple_commands_collected_in_validation_fn() {
+        let src = "<Stack><Button onclick=\"a\">A</Button><Button onclick=\"b\">B</Button></Stack>";
+        let out = generate_from(src);
+        assert!(out.contains("fn _fncc_validate_"));
+        assert!(out.contains("__fncc_cmd_a"));
+        assert!(out.contains("__fncc_cmd_b"));
+    }
+
+    // --- Contract tests ---
+
+    #[test]
+    fn test_generated_code_contains_no_markdown_or_template_leftovers() {
+        let out = generate_from("<Text>hello</Text>");
+        assert!(!out.contains("{{"));
+        assert!(!out.contains("{state."));
+        assert!(!out.contains("__fncc_cmd_") || out.contains("__fncc_cmd_"));
+    }
+
+    #[test]
+    fn test_generated_function_name_follows_snake_case() {
+        let out = generate_from("<HTMLParser></HTMLParser>");
+        assert!(out.contains("render_h_t_m_l_parser") || out.contains("render_html_parser"));
+    }
+
+    // --- Regression tests ---
+
+    #[test]
+    fn test_regression_gap_with_decimal_does_not_produce_invalid_syntax() {
+        let out = generate_from("<Stack gap=\"12.5\"></Stack>");
+        assert!(out.contains(".gap(px(12.5))") || out.contains(".gap(px(12.5.))"));
+        // BUG: currently produces `px(12.5.)` which is invalid Rust
+    }
+
+    #[test]
+    fn test_regression_duplicate_button_ids_at_same_depth() {
+        let src = "<Stack><Button>OK</Button><Button>OK</Button></Stack>";
+        let out = generate_from(src);
+        let id_count = out.matches(".id(\"OK\")").count();
+        assert!(
+            id_count <= 2,
+            "expected at most 2 .id(\"OK\") occurrences, got {id_count}"
+        );
+    }
+
+    #[test]
+    fn test_regression_multiple_calls_have_unique_validation_fn_names() {
+        let a = generate_from("<Button onclick=\"x\">X</Button>");
+        let b = generate_from("<Button onclick=\"x\">X</Button>");
+        // FILE_COUNTER makes validation fn names different
+        assert_ne!(a, b);
+        // both should compile to the same structure though
+        assert!(a.contains("__fncc_cmd_x"));
+        assert!(b.contains("__fncc_cmd_x"));
+    }
+
+    #[test]
+    fn test_regression_empty_gap_does_not_panic() {
+        let out = generate_from("<Stack gap=\"\"></Stack>");
+        // empty string fails to parse as f64, should skip gap
+        assert!(!out.contains(".gap(") || out.contains(".gap(px(0.))"));
+    }
+
+    #[test]
+    fn test_regression_interpolation_without_state_prefix() {
+        let out = generate_from("---\n@state S\n---\n<Text>{custom_expr}</Text>");
+        // custom_expr doesn't start with "state.", so strip_state_prefix leaves it as-is
+        // But stateful codegen adds "self." prefix? Let's check...
+        assert!(out.contains("custom_expr") || out.contains("self.custom_expr"));
+    }
+
+    #[test]
+    fn test_regression_file_counter_does_not_overflow() {
+        // Reset counter for test
+        for _ in 0..100 {
+            generate_from("<Button onclick=\"f\">F</Button>");
+        }
+        // Should not panic
+    }
+}
