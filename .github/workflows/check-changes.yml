@@ -1,0 +1,23 @@
+name: Check Changesets (.changes/)
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'crates/**'
+      - '.changes/**'
+
+jobs:
+  check-changes:
+    name: Validate .changes/ files
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Validate Changeset Files
+        run: cargo run -p xtask -- check
