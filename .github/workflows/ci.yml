@@ -8,9 +8,13 @@ on:
       - 'crates/**'
       - 'apps/**'
       - 'xtask/**'
+      - '.changes/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
-      - '.github/workflows/ci.yml'
+      - '.github/workflows/*.yml'
+      - '.rustfmt.toml'
+      - 'clippy.toml'
+      - 'taplo.toml'
   push:
     branches:
       - main
@@ -20,6 +24,11 @@ on:
       - 'xtask/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
+      - '.github/workflows/*.yml'
+      - '.rustfmt.toml'
+      - 'clippy.toml'
+      - 'taplo.toml'
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -39,11 +48,17 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
 
+      - name: Install taplo
+        uses: uncenter/install-action@taplo
+
+      - name: Check TOML formatting
+        run: taplo format --check
+
       - name: Check formatting
         run: cargo fmt --all --check
 
       - name: Clippy
-        run: cargo clippy --workspace -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Run tests
         run: cargo test --workspace
