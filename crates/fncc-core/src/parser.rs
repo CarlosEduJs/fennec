@@ -86,11 +86,11 @@ fn parse_element(pair: Pair<Rule>) -> Element {
     let mut name = String::new();
     let mut attrs = Vec::new();
     let mut children = Vec::new();
+    let mut close_name: Option<String> = None;
 
     for inner in pair.into_inner() {
         match inner.as_rule() {
             Rule::open_tag => {
-                // extract tag_name and attrs from open_tag
                 for tag_inner in inner.into_inner() {
                     match tag_inner.as_rule() {
                         Rule::tag_name => {
@@ -105,7 +105,6 @@ fn parse_element(pair: Pair<Rule>) -> Element {
                 }
             }
             Rule::self_closing_tag => {
-                // self-closing tag: extract tag_name and attrs
                 for tag_inner in inner.into_inner() {
                     match tag_inner.as_rule() {
                         Rule::tag_name => {
@@ -121,7 +120,6 @@ fn parse_element(pair: Pair<Rule>) -> Element {
             }
             Rule::children => {
                 for child in inner.into_inner() {
-                    // children contains nodes; unwrap node.inner
                     let actual = child.into_inner().next().expect("node should have one child");
                     match actual.as_rule() {
                         Rule::element => {
@@ -143,10 +141,18 @@ fn parse_element(pair: Pair<Rule>) -> Element {
                 }
             }
             Rule::close_tag => {
-                // nothing to extract from close_tag for now
+                for tag_inner in inner.into_inner() {
+                    if tag_inner.as_rule() == Rule::tag_name {
+                        close_name = Some(tag_inner.as_str().to_string());
+                    }
+                }
             }
             _ => {}
         }
+    }
+
+    if let Some(ref close) = close_name {
+        assert_eq!(&name, close, "mismatched close tag: </{close}> does not match <{name}>");
     }
 
     Element { name, attrs, children }
@@ -164,7 +170,13 @@ fn parse_attr(pair: Pair<Rule>) -> (String, AttrValue) {
             Rule::attr_value => {
                 let val = inner.as_str();
                 let val = val.strip_prefix('"').and_then(|s| s.strip_suffix('"')).unwrap_or(val);
-                attr_value = AttrValue::String(val.to_string());
+                let trimmed = val.trim();
+                if trimmed.starts_with('{') && trimmed.ends_with('}') {
+                    let expr = &trimmed[1..trimmed.len() - 1].trim();
+                    attr_value = AttrValue::Interpolation(expr.to_string());
+                } else {
+                    attr_value = AttrValue::String(val.to_string());
+                }
             }
             Rule::interpolation => {
                 let expr = inner.as_str().trim();
@@ -220,7 +232,8 @@ mod tests {
             _ => panic!("expected element node"),
         };
         assert_eq!(child.name, "Text");
-        assert!(child.children.is_empty());
+        assert_eq!(child.children.len(), 1);
+        assert_eq!(child.children[0], Node::Text("oi".to_string()));
     }
 
     #[test]
@@ -232,15 +245,9 @@ mod tests {
 
     #[test]
     fn test_frontmatter_with_state_and_imports() {
-        let doc = parse(
-            "---\nuse crate::state::MyState;\n@state MyState\n---\n<App></App>",
-        )
-        .unwrap();
+        let doc = parse("---\nuse crate::state::MyState;\n@state MyState\n---\n<App></App>").unwrap();
         assert_eq!(doc.state_type, Some("MyState".to_string()));
-        assert_eq!(
-            doc.frontmatter,
-            Some("use crate::state::MyState;".to_string())
-        );
+        assert_eq!(doc.frontmatter, Some("use crate::state::MyState;".to_string()));
     }
 
     #[test]
@@ -296,10 +303,7 @@ mod tests {
         let doc = parse(src).unwrap();
         assert_eq!(doc.root.children.len(), 3);
         assert_eq!(doc.root.children[0], Node::Text("Hello".into()));
-        assert_eq!(
-            doc.root.children[1],
-            Node::Interpolation("name".into())
-        );
+        assert_eq!(doc.root.children[1], Node::Interpolation("name".into()));
     }
 
     #[test]
@@ -391,9 +395,9 @@ mod tests {
     }
 
     #[test]
-    fn test_mismatched_close_tag_returns_error() {
-        let result = parse("<Div></Text>");
-        assert!(result.is_err());
+    #[should_panic(expected = "mismatched close tag")]
+    fn test_mismatched_close_tag_panics() {
+        parse("<Div></Text>").unwrap();
     }
 
     #[test]

@@ -31,12 +31,22 @@ pub fn generate_all(ui_dir: &Path, out_file: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static LIB_TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+    fn test_dir() -> (PathBuf, PathBuf) {
+        let id = LIB_TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("fncc_lib_test_{id}"));
+        let ui_dir = dir.join("ui");
+        std::fs::create_dir_all(&ui_dir).unwrap();
+        (dir, ui_dir)
+    }
 
     #[test]
     fn test_generate_all_creates_output_file() {
-        let dir = std::env::temp_dir().join(format!("fncc_test_{}", std::process::id()));
-        let ui_dir = dir.join("ui");
-        std::fs::create_dir_all(&ui_dir).unwrap();
+        let (dir, ui_dir) = test_dir();
         std::fs::write(ui_dir.join("App.fui"), "<Text>hello</Text>").unwrap();
         let out_file = dir.join("out.rs");
 
@@ -51,9 +61,7 @@ mod tests {
 
     #[test]
     fn test_generate_all_ignores_non_fui_files() {
-        let dir = std::env::temp_dir().join(format!("fncc_test_{}", std::process::id()));
-        let ui_dir = dir.join("ui");
-        std::fs::create_dir_all(&ui_dir).unwrap();
+        let (dir, ui_dir) = test_dir();
         std::fs::write(ui_dir.join("App.fui"), "<A></A>").unwrap();
         std::fs::write(ui_dir.join("notes.txt"), "not a fui").unwrap();
         std::fs::write(ui_dir.join("main.rs"), "fn main() {}").unwrap();

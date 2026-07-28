@@ -46,10 +46,14 @@ mod tests {
     use super::*;
     use std::io::Write;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static CONFIG_TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
     fn write_config(content: &str) -> PathBuf {
         let dir = std::env::temp_dir();
-        let path = dir.join(format!("fncc_test_config_{}.toml", std::process::id()));
+        let id = CONFIG_TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path = dir.join(format!("fncc_test_config_{}.toml", id));
         let mut f = std::fs::File::create(&path).unwrap();
         write!(f, "{content}").unwrap();
         path

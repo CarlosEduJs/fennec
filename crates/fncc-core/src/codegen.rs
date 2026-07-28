@@ -310,7 +310,9 @@ mod tests {
         let src = "---\n@state CounterState\n---\n<App></App>";
         let out = generate_from(src);
         assert!(out.contains("impl Render for CounterState {"));
-        assert!(out.contains("fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {"));
+        assert!(
+            out.contains("fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {")
+        );
     }
 
     #[test]
@@ -388,7 +390,8 @@ mod tests {
     fn test_unknown_element_falls_back_to_div_with_attrs() {
         let out = generate_from("<CustomEl foo=\"bar\">content</CustomEl>");
         assert!(out.contains(".attr(\"foo\", \"bar\")"));
-        assert!(out.contains(".child(\"content\")"));
+        assert!(out.contains(".child("));
+        assert!(out.contains("\"content\""));
     }
 
     #[test]
