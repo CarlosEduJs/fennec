@@ -1,10 +1,10 @@
 [package]
 name = "fennec-example"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 
 [dependencies]
-fennec = { path = "../../crates/fennec" }
+fennec = { path = "../../crates/fennec" , version = "0.1.0" }
 
 [build-dependencies]
-fennec-core = { path = "../../crates/fennec-core" }
+fennec-core = { path = "../../crates/fennec-core" , version = "0.1.0" }
