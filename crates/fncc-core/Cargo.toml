@@ -12,4 +12,8 @@ anyhow = "1"
 pest = "2"
 pest_derive = "2"
 serde = { version = "1", features = ["derive"] }
+syn = { version = "2", default-features = false, features = [
+    "full",
+    "parsing",
+] }
 toml = "0.8"

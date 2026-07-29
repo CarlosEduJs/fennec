@@ -275,6 +275,25 @@ fn parse_fui_imports(path: &str) -> Option<Vec<ComponentImport>> {
     }
 }
 
+/// Collect all command names referenced via `onclick` attributes in an element tree.
+pub fn collect_commands(el: &Element) -> Vec<String> {
+    let mut cmds = Vec::new();
+    for (key, val) in &el.attrs {
+        if key == "onclick"
+            && let AttrValue::String(name) = val
+            && !cmds.contains(name)
+        {
+            cmds.push(name.clone());
+        }
+    }
+    for child in &el.children {
+        if let Node::Element(child_el) = child {
+            cmds.extend(collect_commands(child_el));
+        }
+    }
+    cmds
+}
+
 fn parse_gpui_imports(path: &str) -> Option<Vec<ComponentImport>> {
     let name = path.strip_prefix("gpui::")?;
     // No grouped imports for gpui (for now)
