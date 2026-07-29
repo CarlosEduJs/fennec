@@ -1,0 +1,7 @@
+---
+use props::HeaderProps;
+---
+<Stack direction="vertical" gap="2">
+    <Text size="3xl">{props.title}</Text>
+    <Text size="base">{props.subtitle}</Text>
+</Stack>

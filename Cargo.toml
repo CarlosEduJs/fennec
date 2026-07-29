@@ -7,6 +7,7 @@ members = [
     "apps/example-app",
     "apps/components-app",
     "apps/semantic-app",
+    "apps/props-app",
     "xtask",
 ]
 resolver = "3"

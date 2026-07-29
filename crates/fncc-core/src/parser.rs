@@ -18,6 +18,8 @@ pub enum ImportSource {
     FuiPath(String),
     /// A GPUI native component, e.g. `use gpui::TextInput;`
     Gpui,
+    /// A props type, e.g. `use props::HeaderProps;`
+    PropsType,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -219,9 +221,10 @@ fn parse_attr(pair: Pair<Rule>) -> (String, AttrValue) {
     (attr_name, attr_value)
 }
 
-/// Check if a trimmed line is a component import (`use ui::...` or `use gpui::...`)
+/// Check if a trimmed line is a component import (`use ui::...`, `use gpui::...`, or `use props::...`)
 fn is_component_import_line(line: &str) -> bool {
-    (line.starts_with("use ui::") || line.starts_with("use gpui::")) && line.ends_with(';')
+    (line.starts_with("use ui::") || line.starts_with("use gpui::") || line.starts_with("use props::"))
+        && line.ends_with(';')
 }
 
 /// Parse component imports from a `use` line.
@@ -229,12 +232,15 @@ fn is_component_import_line(line: &str) -> bool {
 /// - `use ui::components::Button;`
 /// - `use ui::components::{Button, Input};`
 /// - `use gpui::TextInput;`
+/// - `use props::HeaderProps;`
 fn parse_component_imports(line: &str) -> Option<Vec<ComponentImport>> {
     let trimmed = line.strip_prefix("use ")?.strip_suffix(';')?.trim();
     if trimmed.starts_with("ui::") {
         parse_fui_imports(trimmed)
     } else if trimmed.starts_with("gpui::") {
         parse_gpui_imports(trimmed)
+    } else if trimmed.starts_with("props::") {
+        parse_props_imports(trimmed)
     } else {
         None
     }
@@ -259,9 +265,16 @@ fn parse_fui_imports(path: &str) -> Option<Vec<ComponentImport>> {
         Some(
             names
                 .into_iter()
-                .map(|name| ComponentImport {
-                    name: name.clone(),
-                    source: ImportSource::FuiPath(format!("ui::{}::{}", prefix, name)),
+                .map(|name| {
+                    let source = if prefix.is_empty() {
+                        format!("ui::{name}")
+                    } else {
+                        format!("ui::{prefix}::{name}")
+                    };
+                    ComponentImport {
+                        name: name.clone(),
+                        source: ImportSource::FuiPath(source),
+                    }
                 })
                 .collect(),
         )
@@ -273,6 +286,35 @@ fn parse_fui_imports(path: &str) -> Option<Vec<ComponentImport>> {
             source: ImportSource::FuiPath(format!("ui::{}", rest)),
         }])
     }
+}
+
+/// Check whether an element tree contains `{props.field}` interpolation.
+/// Used to determine if a component actually receives props (vs merely referencing
+/// a PropsType import for a child component).
+pub fn uses_props_interpolation(el: &Element) -> bool {
+    for (_, val) in &el.attrs {
+        if let AttrValue::Interpolation(expr) = val
+            && expr.trim().starts_with("props.")
+        {
+            return true;
+        }
+    }
+    for child in &el.children {
+        match child {
+            Node::Interpolation(expr) => {
+                if expr.trim().starts_with("props.") {
+                    return true;
+                }
+            }
+            Node::Element(child_el) => {
+                if uses_props_interpolation(child_el) {
+                    return true;
+                }
+            }
+            Node::Text(_) => {}
+        }
+    }
+    false
 }
 
 /// Collect all command names referenced via `onclick` attributes in an element tree.
@@ -304,6 +346,39 @@ fn parse_gpui_imports(path: &str) -> Option<Vec<ComponentImport>> {
         name: name.to_string(),
         source: ImportSource::Gpui,
     }])
+}
+
+fn parse_props_imports(path: &str) -> Option<Vec<ComponentImport>> {
+    let rest = path.strip_prefix("props::")?;
+    if let Some(brace_start) = rest.find('{') {
+        // Grouped: "props::{HeaderProps, FooterProps}"
+        let inner = &rest[brace_start + 1..];
+        let inner = inner.split('}').next()?.trim();
+        let names: Vec<String> = inner
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if names.is_empty() {
+            return None;
+        }
+        Some(
+            names
+                .into_iter()
+                .map(|name| ComponentImport {
+                    name,
+                    source: ImportSource::PropsType,
+                })
+                .collect(),
+        )
+    } else if rest.contains("::") {
+        None
+    } else {
+        Some(vec![ComponentImport {
+            name: rest.to_string(),
+            source: ImportSource::PropsType,
+        }])
+    }
 }
 
 #[cfg(test)]

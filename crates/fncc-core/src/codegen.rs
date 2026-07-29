@@ -5,7 +5,7 @@ pub fn generate(doc: &Document) -> String {
 }
 
 pub fn generate_with_id(doc: &Document, file_id: usize) -> String {
-    generate_with_imports(doc, file_id, &[], None, None)
+    generate_with_imports(doc, file_id, &[], None, None, None, &[])
 }
 
 /// Resolved import entry: (tag_name, render_fn_name)
@@ -23,6 +23,8 @@ pub fn generate_with_imports(
     imports: &[ResolvedImport],
     component_name: Option<&str>,
     resolved_state_type: Option<&str>,
+    props_type: Option<&str>,
+    import_props: &[(&str, Option<&str>)],
 ) -> String {
     let mut out = String::new();
     let state_type = resolved_state_type.or(doc.state_type.as_deref());
@@ -46,42 +48,65 @@ pub fn generate_with_imports(
     }
 
     if has_state {
-        generate_stateful(doc, &mut out, imports, state_type);
+        generate_stateful(doc, &mut out, imports, state_type, import_props);
     } else {
-        generate_stateless(doc, &mut out, imports, component_name);
+        generate_stateless(doc, &mut out, imports, component_name, props_type, import_props);
     }
 
     out
 }
 
-fn generate_stateless(doc: &Document, out: &mut String, imports: &[ResolvedImport], component_name: Option<&str>) {
+fn generate_stateless(
+    doc: &Document,
+    out: &mut String,
+    imports: &[ResolvedImport],
+    component_name: Option<&str>,
+    props_type: Option<&str>,
+    import_props: &[(&str, Option<&str>)],
+) {
     let name = component_name.unwrap_or(&doc.root.name);
     let fn_name = format!("render_{}", to_snake_case(name));
-    out.push_str(&format!("pub fn {fn_name}() -> impl IntoElement {{\n"));
-    out.push_str(&generate_element(&doc.root, 1, false, imports));
+    if let Some(pt) = props_type {
+        out.push_str(&format!("pub fn {fn_name}(props: &{pt}) -> impl IntoElement {{\n"));
+    } else {
+        out.push_str(&format!("pub fn {fn_name}() -> impl IntoElement {{\n"));
+    }
+    out.push_str(&generate_element(&doc.root, 1, false, imports, import_props));
     out.push('\n');
     out.push_str("}\n");
 }
 
-fn generate_stateful(doc: &Document, out: &mut String, imports: &[ResolvedImport], state_type: Option<&str>) {
+fn generate_stateful(
+    doc: &Document,
+    out: &mut String,
+    imports: &[ResolvedImport],
+    state_type: Option<&str>,
+    import_props: &[(&str, Option<&str>)],
+) {
     let state_type = state_type.unwrap_or("Self");
 
     out.push_str(&format!("impl Render for {state_type} {{\n"));
     out.push_str("    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {\n");
     out.push_str("        let handle = cx.entity().downgrade();\n");
-    out.push_str(&generate_element(&doc.root, 2, true, imports));
+    out.push_str(&generate_element(&doc.root, 2, true, imports, import_props));
     out.push_str("\n    }\n");
     out.push_str("}\n");
 }
 
-fn generate_element(el: &Element, depth: usize, stateful: bool, imports: &[ResolvedImport]) -> String {
+fn generate_element(
+    el: &Element,
+    depth: usize,
+    stateful: bool,
+    imports: &[ResolvedImport],
+    import_props: &[(&str, Option<&str>)],
+) -> String {
     let indent = "    ".repeat(depth);
 
     // Built-in elements
     match el.name.as_str() {
-        "Stack" => return gen_stack(el, &indent, depth, stateful, imports),
-        "Text" => return gen_text(el, &indent, depth, stateful, imports),
-        "Button" => return gen_button(el, &indent, depth, stateful, imports),
+        "Stack" => return gen_stack(el, &indent, depth, stateful, imports, import_props),
+        "Text" => return gen_text(el, &indent, depth, stateful, imports, import_props),
+        "Button" => return gen_button(el, &indent, depth, stateful, imports, import_props),
         _ => {}
     }
 
@@ -91,14 +116,31 @@ fn generate_element(el: &Element, depth: usize, stateful: bool, imports: &[Resol
         .find(|(name, fn_name)| name == &el.name && !fn_name.is_empty())
         .map(|(_, fn_name)| *fn_name)
     {
-        return format!("{indent}{render_fn}()");
+        let props_type = import_props.iter().find(|(n, _)| n == &el.name).and_then(|(_, p)| *p);
+        return if let Some(pt) = props_type {
+            let mut struct_fields = String::new();
+            for (attr_name, attr_val) in &el.attrs {
+                let v = attr_val.as_str();
+                struct_fields.push_str(&format!("\n{indent}        {attr_name}: {v:?}.into(),"));
+            }
+            format!("{indent}{render_fn}(&{pt} {{ {struct_fields}\n{indent}    }})")
+        } else {
+            format!("{indent}{render_fn}()")
+        };
     }
 
     // Fallback for gpui imports and unknown elements
-    gen_fallback(el, &indent, depth, stateful, imports)
+    gen_fallback(el, &indent, depth, stateful, imports, import_props)
 }
 
-fn gen_stack(el: &Element, indent: &str, depth: usize, stateful: bool, imports: &[ResolvedImport]) -> String {
+fn gen_stack(
+    el: &Element,
+    indent: &str,
+    depth: usize,
+    stateful: bool,
+    imports: &[ResolvedImport],
+    import_props: &[(&str, Option<&str>)],
+) -> String {
     let mut out = format!("{indent}div()\n");
 
     let mut is_vertical = false;
@@ -125,14 +167,14 @@ fn gen_stack(el: &Element, indent: &str, depth: usize, stateful: bool, imports: 
         out.push_str(&format!("{indent}    .child(\n"));
         match child {
             Node::Element(child_el) => {
-                out.push_str(&generate_element(child_el, depth + 2, stateful, imports));
+                out.push_str(&generate_element(child_el, depth + 2, stateful, imports, import_props));
             }
             Node::Text(t) => {
                 out.push_str(&format!("{indent}        \"{t}\""));
             }
             Node::Interpolation(expr) => {
-                let e = strip_state_prefix(expr);
-                out.push_str(&format!("{indent}        format!(\"{{}}\", self.{e})"));
+                let e = interpolation_expr(expr);
+                out.push_str(&format!("{indent}        {e}.to_string()"));
             }
         }
         out.push('\n');
@@ -142,7 +184,14 @@ fn gen_stack(el: &Element, indent: &str, depth: usize, stateful: bool, imports: 
     out.trim_end().to_string()
 }
 
-fn gen_text(el: &Element, indent: &str, depth: usize, stateful: bool, imports: &[ResolvedImport]) -> String {
+fn gen_text(
+    el: &Element,
+    indent: &str,
+    depth: usize,
+    stateful: bool,
+    imports: &[ResolvedImport],
+    import_props: &[(&str, Option<&str>)],
+) -> String {
     let mut out = format!("{indent}div()\n");
 
     for (key, val) in &el.attrs {
@@ -167,20 +216,20 @@ fn gen_text(el: &Element, indent: &str, depth: usize, stateful: bool, imports: &
             out.push_str(&format!("{indent}    .child(\"{t}\")"));
         }
         [Node::Interpolation(expr)] => {
-            let e = strip_state_prefix(expr);
-            out.push_str(&format!("{indent}    .child(format!(\"{{}}\", self.{e}))"));
+            let e = interpolation_expr(expr);
+            out.push_str(&format!("{indent}    .child({e}.to_string())"));
         }
         children => {
             for child in children {
                 match child {
                     Node::Text(t) => out.push_str(&format!("{indent}    .child(\"{t}\")\n")),
                     Node::Interpolation(expr) => {
-                        let e = strip_state_prefix(expr);
-                        out.push_str(&format!("{indent}    .child(format!(\"{{}}\", self.{e}))\n"));
+                        let e = interpolation_expr(expr);
+                        out.push_str(&format!("{indent}    .child({e}.to_string())\n"));
                     }
                     Node::Element(child_el) => {
                         out.push_str(&format!("{indent}    .child(\n"));
-                        out.push_str(&generate_element(child_el, depth + 1, stateful, imports));
+                        out.push_str(&generate_element(child_el, depth + 1, stateful, imports, import_props));
                         out.push_str(&format!("\n{indent}    )\n"));
                     }
                 }
@@ -191,7 +240,14 @@ fn gen_text(el: &Element, indent: &str, depth: usize, stateful: bool, imports: &
     out.trim_end().to_string()
 }
 
-fn gen_button(el: &Element, indent: &str, depth: usize, stateful: bool, imports: &[ResolvedImport]) -> String {
+fn gen_button(
+    el: &Element,
+    indent: &str,
+    depth: usize,
+    stateful: bool,
+    imports: &[ResolvedImport],
+    import_props: &[(&str, Option<&str>)],
+) -> String {
     let mut out = format!("{indent}div()\n");
 
     let btn_id = match &el.children[..] {
@@ -224,8 +280,8 @@ fn gen_button(el: &Element, indent: &str, depth: usize, stateful: bool, imports:
     match &el.children[..] {
         [Node::Text(t)] => out.push_str(&format!("{indent}    .child(\"{t}\")")),
         [Node::Interpolation(expr)] => {
-            let e = strip_state_prefix(expr);
-            out.push_str(&format!("{indent}    .child(format!(\"{{}}\", self.{e}))"));
+            let e = interpolation_expr(expr);
+            out.push_str(&format!("{indent}    .child({e}.to_string())"));
         }
         children => {
             for child in children {
@@ -233,12 +289,12 @@ fn gen_button(el: &Element, indent: &str, depth: usize, stateful: bool, imports:
                     Node::Text(t) => out.push_str(&format!("{indent}    .child(\"{t}\")\n")),
                     Node::Element(child_el) => {
                         out.push_str(&format!("{indent}    .child(\n"));
-                        out.push_str(&generate_element(child_el, depth + 1, stateful, imports));
+                        out.push_str(&generate_element(child_el, depth + 1, stateful, imports, import_props));
                         out.push_str(&format!("\n{indent}    )\n"));
                     }
                     Node::Interpolation(expr) => {
-                        let e = strip_state_prefix(expr);
-                        out.push_str(&format!("{indent}    .child(format!(\"{{}}\", self.{e}))\n"));
+                        let e = interpolation_expr(expr);
+                        out.push_str(&format!("{indent}    .child({e}.to_string())\n"));
                     }
                 }
             }
@@ -248,7 +304,14 @@ fn gen_button(el: &Element, indent: &str, depth: usize, stateful: bool, imports:
     out.trim_end().to_string()
 }
 
-fn gen_fallback(el: &Element, indent: &str, depth: usize, stateful: bool, imports: &[ResolvedImport]) -> String {
+fn gen_fallback(
+    el: &Element,
+    indent: &str,
+    depth: usize,
+    stateful: bool,
+    imports: &[ResolvedImport],
+    import_props: &[(&str, Option<&str>)],
+) -> String {
     let mut out = format!("{indent}div()\n");
     for (key, val) in &el.attrs {
         let v = val.as_str();
@@ -258,12 +321,12 @@ fn gen_fallback(el: &Element, indent: &str, depth: usize, stateful: bool, import
         out.push_str(&format!("{indent}    .child(\n"));
         match child {
             Node::Element(child_el) => {
-                out.push_str(&generate_element(child_el, depth + 2, stateful, imports));
+                out.push_str(&generate_element(child_el, depth + 2, stateful, imports, import_props));
             }
             Node::Text(t) => out.push_str(&format!("{indent}        \"{t}\"")),
             Node::Interpolation(expr) => {
-                let e = strip_state_prefix(expr);
-                out.push_str(&format!("{indent}        format!(\"{{}}\", self.{e})"));
+                let e = interpolation_expr(expr);
+                out.push_str(&format!("{indent}        {e}.to_string()"));
             }
         }
         out.push('\n');
@@ -272,10 +335,19 @@ fn gen_fallback(el: &Element, indent: &str, depth: usize, stateful: bool, import
     out.trim_end().to_string()
 }
 
-/// Removes `state.` prefix from interpolation expressions
-/// e.g. "state.count" → "count"
-fn strip_state_prefix(expr: &str) -> &str {
-    expr.trim().strip_prefix("state.").unwrap_or(expr.trim())
+/// Resolve an interpolation expression to the correct Rust variable reference.
+/// - `state.field` → `self.field` (for stateful components)
+/// - `props.field` → `props.field` (for stateless components with props)
+/// - `bare_expr` → `self.bare_expr` (fallback for stateful components)
+fn interpolation_expr(expr: &str) -> String {
+    let trimmed = expr.trim();
+    if let Some(field) = trimmed.strip_prefix("state.") {
+        format!("self.{field}")
+    } else if trimmed.starts_with("props.") {
+        trimmed.to_string()
+    } else {
+        format!("self.{trimmed}")
+    }
 }
 
 pub(crate) fn to_snake_case(name: &str) -> String {
@@ -415,7 +487,7 @@ mod tests {
     #[test]
     fn test_interpolation_in_text_content_generates_format() {
         let out = generate_from("---\n@state S\n---\n<Text>{state.msg}</Text>");
-        assert!(out.contains("format!(\"{}\", self.msg)"));
+        assert!(out.contains("self.msg.to_string()"));
         assert!(!out.contains("self.state.msg"));
     }
 
@@ -423,7 +495,7 @@ mod tests {
     fn test_interpolation_strips_state_prefix() {
         let out = generate_from("<Text>{state.count}</Text>");
         // stateless, so state. prefix is stripped but no self. prefix
-        assert!(out.contains("format!(\"{}\", self.count)"));
+        assert!(out.contains("self.count.to_string()"));
     }
 
     #[test]
@@ -490,8 +562,7 @@ mod tests {
     #[test]
     fn test_regression_interpolation_without_state_prefix() {
         let out = generate_from("---\n@state S\n---\n<Text>{custom_expr}</Text>");
-        // custom_expr doesn't start with "state.", so strip_state_prefix leaves it as-is
-        // But stateful codegen adds "self." prefix? Let's check...
+        // custom_expr doesn't start with "state.", so interpolation_expr returns "self.custom_expr"
         assert!(out.contains("custom_expr") || out.contains("self.custom_expr"));
     }
 
@@ -508,7 +579,7 @@ mod tests {
     fn test_imported_element_generates_render_call() {
         let doc = parse("<Stack><Header /></Stack>").unwrap();
         let imports: &[(&str, &str)] = &[("Header", "render_header")];
-        let out = generate_with_imports(&doc, 0, imports, None, None);
+        let out = generate_with_imports(&doc, 0, imports, None, None, None, &[]);
         assert!(out.contains("render_header()"));
     }
 
@@ -517,7 +588,7 @@ mod tests {
         let src = "---\n@state AppState\n---\n<Stack><Footer /></Stack>";
         let doc = parse(src).unwrap();
         let imports: &[(&str, &str)] = &[("Footer", "render_footer")];
-        let out = generate_with_imports(&doc, 0, imports, None, None);
+        let out = generate_with_imports(&doc, 0, imports, None, None, None, &[]);
         assert!(out.contains("render_footer()"));
     }
 
@@ -525,7 +596,7 @@ mod tests {
     fn test_gpui_import_falls_back_to_div() {
         let doc = parse("<Stack><TextInput /></Stack>").unwrap();
         let imports: &[(&str, &str)] = &[("TextInput", "")];
-        let out = generate_with_imports(&doc, 0, imports, None, None);
+        let out = generate_with_imports(&doc, 0, imports, None, None, None, &[]);
         // GPUI imports have empty render fn — fall through to div
         assert!(out.contains("div()"));
     }
@@ -534,7 +605,7 @@ mod tests {
     fn test_builtin_takes_precedence_over_import() {
         let doc = parse("<Text>hello</Text>").unwrap();
         let imports: &[(&str, &str)] = &[("Text", "render_text")];
-        let out = generate_with_imports(&doc, 0, imports, None, None);
+        let out = generate_with_imports(&doc, 0, imports, None, None, None, &[]);
         // Built-in "Text" handling takes precedence, not render_text()
         assert!(out.contains(".child(\"hello\")"));
     }
@@ -543,16 +614,98 @@ mod tests {
     fn test_imported_element_with_custom_component_name() {
         let doc = parse("<Stack><MyHeader /></Stack>").unwrap();
         let imports: &[(&str, &str)] = &[("MyHeader", "render_header")];
-        let out = generate_with_imports(&doc, 0, imports, None, None);
+        let out = generate_with_imports(&doc, 0, imports, None, None, None, &[]);
         assert!(out.contains("render_header()"));
     }
 
     #[test]
     fn test_render_fn_name_uses_component_name_arg() {
         let doc = parse("<Text>hello</Text>").unwrap();
-        let out = generate_with_imports(&doc, 0, &[], Some("CustomWidget"), None);
+        let out = generate_with_imports(&doc, 0, &[], Some("CustomWidget"), None, None, &[]);
         assert!(out.contains("pub fn render_custom_widget()"));
         // Should NOT use root element name
         assert!(!out.contains("pub fn render_text()"));
+    }
+
+    // --- Props tests ---
+
+    #[test]
+    fn test_props_stateless_component_with_props_signature() {
+        let doc = parse("<Text>{props.title}</Text>").unwrap();
+        let out = generate_with_imports(&doc, 0, &[], Some("Header"), None, Some("HeaderProps"), &[]);
+        assert!(out.contains("pub fn render_header(props: &HeaderProps) -> impl IntoElement {"));
+        assert!(out.contains("props.title"));
+    }
+
+    #[test]
+    fn test_props_caller_generates_struct_construction() {
+        let doc = parse("<Header title=\"Welcome\" />").unwrap();
+        let imports: &[(&str, &str)] = &[("Header", "render_header")];
+        let import_props: &[(&str, Option<&str>)] = &[("Header", Some("HeaderProps"))];
+        let out = generate_with_imports(&doc, 0, imports, None, None, None, import_props);
+        assert!(out.contains("render_header(&HeaderProps {"));
+        assert!(out.contains("title: \"Welcome\".into(),"));
+        assert!(out.contains("})"));
+    }
+
+    #[test]
+    fn test_props_caller_multiple_attributes() {
+        let doc = parse("<Header title=\"Hi\" subtitle=\"World\" />").unwrap();
+        let imports: &[(&str, &str)] = &[("Header", "render_header")];
+        let import_props: &[(&str, Option<&str>)] = &[("Header", Some("HeaderProps"))];
+        let out = generate_with_imports(&doc, 0, imports, None, None, None, import_props);
+        assert!(out.contains("title: \"Hi\".into(),"));
+        assert!(out.contains("subtitle: \"World\".into(),"));
+    }
+
+    #[test]
+    fn test_props_caller_option_field() {
+        let doc = parse("<Header title=\"Hi\" />").unwrap();
+        let imports: &[(&str, &str)] = &[("Header", "render_header")];
+        let import_props: &[(&str, Option<&str>)] = &[("Header", Some("HeaderProps"))];
+        let out = generate_with_imports(&doc, 0, imports, None, None, None, import_props);
+        // Option<T> fields are transparent at codegen — .into() handles conversion
+        assert!(out.contains("title: \"Hi\".into(),"));
+    }
+
+    #[test]
+    fn test_props_nested_element_with_props() {
+        let doc = parse("<Stack><Header title=\"Nested\" /><Text>ok</Text></Stack>").unwrap();
+        let imports: &[(&str, &str)] = &[("Header", "render_header")];
+        let import_props: &[(&str, Option<&str>)] = &[("Header", Some("HeaderProps"))];
+        let out = generate_with_imports(&doc, 0, imports, None, None, None, import_props);
+        assert!(out.contains("render_header(&HeaderProps {"));
+        assert!(out.contains("title: \"Nested\".into(),"));
+    }
+
+    #[test]
+    fn test_props_mixed_components_with_and_without_props() {
+        let doc = parse("<Stack><Header title=\"A\" /><Footer /></Stack>").unwrap();
+        let imports: &[(&str, &str)] = &[("Header", "render_header"), ("Footer", "render_footer")];
+        let import_props: &[(&str, Option<&str>)] = &[("Header", Some("HeaderProps")), ("Footer", None)];
+        let out = generate_with_imports(&doc, 0, imports, None, None, None, import_props);
+        assert!(out.contains("render_header(&HeaderProps {"));
+        assert!(out.contains("title: \"A\".into(),"));
+        assert!(out.contains("render_footer()"));
+    }
+
+    #[test]
+    fn test_props_element_without_props_still_calls_directly() {
+        let doc = parse("<Footer />").unwrap();
+        let imports: &[(&str, &str)] = &[("Footer", "render_footer")];
+        let import_props: &[(&str, Option<&str>)] = &[("Footer", None)];
+        let out = generate_with_imports(&doc, 0, imports, None, None, None, import_props);
+        assert!(out.contains("render_footer()"));
+        assert!(!out.contains("&"));
+    }
+
+    #[test]
+    fn test_props_self_closing_with_props() {
+        let doc = parse("<Header title=\"SelfClose\" subtitle=\"X\" />").unwrap();
+        let imports: &[(&str, &str)] = &[("Header", "render_header")];
+        let import_props: &[(&str, Option<&str>)] = &[("Header", Some("HeaderProps"))];
+        let out = generate_with_imports(&doc, 0, imports, None, None, None, import_props);
+        assert!(out.contains("title: \"SelfClose\".into(),"));
+        assert!(out.contains("subtitle: \"X\".into(),"));
     }
 }

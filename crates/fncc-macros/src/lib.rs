@@ -129,6 +129,13 @@ fn extract_state_type(inputs: &syn::punctuated::Punctuated<FnArg, syn::Token![,]
     syn::parse_quote!(Self)
 }
 
+/// Marker derive — no generated code. The build-script scanner detects
+/// `#[derive(Props)]` via `syn` and extracts field metadata for codegen.
+#[proc_macro_derive(Props)]
+pub fn derive_props(_input: TokenStream) -> TokenStream {
+    TokenStream::new()
+}
+
 fn is_unit(ty: &Type) -> bool {
     match ty {
         Type::Tuple(tup) => tup.elems.is_empty(),

@@ -1,0 +1,11 @@
+[package]
+edition = "2024"
+name = "props-app"
+publish = false
+version = "0.0.0"
+
+[dependencies]
+fncc = { path = "../../crates/fncc", version = "0.1.1" }
+
+[build-dependencies]
+fncc-core = { path = "../../crates/fncc-core", version = "0.4.0" }
