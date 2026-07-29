@@ -697,25 +697,36 @@ fn run_publish(root: &Path, dry_run: bool, execute: bool) -> Result<()> {
 
             println!("\n📦 Processing crate: {krate} v{version}");
 
-            if execute && !dry_run {
-                let status = std::process::Command::new("cargo")
+            let published = if execute && !dry_run {
+                let output = std::process::Command::new("cargo")
                     .arg("publish")
                     .arg("--package")
                     .arg(krate)
                     .current_dir(crate_dir)
-                    .status()?;
+                    .output()?;
 
-                if !status.success() {
-                    return Err(anyhow!("Failed to publish crate '{krate}' to crates.io"));
+                if output.status.success() {
+                    println!("  ✅ Published successfully.");
+                    println!("  ⏳ Waiting for crates.io index propagation (10s)...");
+                    std::thread::sleep(std::time::Duration::from_secs(10));
+                    true
+                } else {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    if stderr.contains("already exists") {
+                        println!("  ℹ️ Already published. Skipping publish and release.");
+                        false
+                    } else {
+                        return Err(anyhow!("Failed to publish crate '{krate}' to crates.io:\n{stderr}"));
+                    }
                 }
-
-                println!("  ⏳ Waiting for crates.io index propagation (10s)...");
-                std::thread::sleep(std::time::Duration::from_secs(10));
             } else {
                 println!("  [SIMULATION] cargo publish --package {krate}");
-            }
+                true
+            };
 
-            create_tag_and_github_release(krate, version, crate_dir, execute, dry_run)?;
+            if published {
+                create_tag_and_github_release(krate, version, crate_dir, execute, dry_run)?;
+            }
         }
     }
 
