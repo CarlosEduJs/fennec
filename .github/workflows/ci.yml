@@ -40,6 +40,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install system dependencies (gpui)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
