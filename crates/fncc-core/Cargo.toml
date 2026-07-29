@@ -5,7 +5,7 @@ homepage = "https://github.com/carlosedujs/fncc"
 license = "Apache-2.0"
 name = "fncc-core"
 repository = "https://github.com/carlosedujs/fncc"
-version = "0.2.0"
+version = "0.3.0"
 
 [dependencies]
 anyhow = "1"
