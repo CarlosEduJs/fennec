@@ -1,6 +1,10 @@
 # Changelog - fncc
 
 All notable changes to `fncc` crate will be documented in this file.
+## [0.1.1] - 2026-07-29
+
+Updated internal workspace dependency version references.
+
 ## [0.1.0] - 2026-07-28
 
 - Umbrella crate that re-exports `fncc-macros` and `fncc-runtime` for convenience.
