@@ -1797,7 +1797,7 @@ dependencies = [
 
 [[package]]
 name = "fncc"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "fncc-macros",
  "fncc-runtime",
@@ -1805,7 +1805,7 @@ dependencies = [
 
 [[package]]
 name = "fncc-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "pest",
@@ -1824,7 +1824,7 @@ dependencies = [
 
 [[package]]
 name = "fncc-macros"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "quote",
  "syn 2.0.119",
