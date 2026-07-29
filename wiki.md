@@ -318,8 +318,105 @@ watch = ["src/ui", "src"]
 - **`@state` inference** — derive state type from command signatures instead of the `@state` directive
 - **Hot reload** — `hot-lib-reloader` (dylib reload) or fast recompile + restart with incremental compilation
 
+## 6. Semantic Analysis
+
+Introduced in `fncc-core` — a build-time view into the Rust source that enables state inference, command validation, and future features like typed props and LSP.
+
+### Architecture
+
+```text
+┌─────────────────────┐
+│  .rs files           │
+│  (main.rs, etc.)     │──→ semantic::analyze_rs_files() → SemanticDb
+└─────────────────────┘      ┌─────────────────────────┐
+                             │  commands: HashMap       │
+┌─────────────────────┐      │  diagnostics: Vec        │
+│  .fui files          │──→  │  (future: components,    │
+│  (src/ui/)           │      │   state_types, types)   │
+└─────────────────────┘      └─────────────────────────┘
+                                      │
+                                      ▼
+                             codegen::generate_with_imports()
+                             (receives resolved_state_type)
+```
+
+### `GenerateOptions` API
+
+Apps opt into semantic analysis by setting `src_dir` in `GenerateOptions`:
+
+```rust
+// build.rs — new API
+fncc_core::generate_all_with_options(fncc_core::GenerateOptions {
+    ui_dir: std::path::Path::new("src/ui"),
+    out_file: &out_file,
+    src_dir: Some(std::path::Path::new("src")),  // enables semantic analysis
+}).unwrap();
+```
+
+The legacy `generate_all(ui_dir, out_file)` continues to work unchanged.
+
+### What it does
+
+1. **Scans `.rs` files** for `#[fncc::command]` annotated functions (recursive, skips unparseable files)
+2. **Extracts command metadata** — name, level (1/2/3), state type (for Level 3)
+3. **Hard-error validation** — every `onclick="cmd"` in `.fui` must have a matching `#[fncc::command] fn cmd()` in `.rs`. If not found, build fails immediately with a clear diagnostic.
+4. **State inference** — when a `.fui` omits `@state`, the compiler infers the state type from Level 3 command signatures. If `@state` is present and conflicts with inference, build fails.
+5. **Multiple state type check** — if commands in the same `.fui` reference different state types, build fails.
+
+### Example: `semantic-app`
+
+**`src/ui/App.fui`** — no `@state` directive:
+```fui
+<Stack direction="vertical" gap="12">
+    <Text size="xl">Counter: {state.count}</Text>
+    <Button onclick="increment">+1</Button>
+</Stack>
+```
+
+**`src/main.rs`** — state type inferred from command:
+```rust
+#[derive(Default)]
+struct CounterState { count: i32 }
+
+#[fncc::command]
+fn increment(state: &mut CounterState, cx: &mut Context<CounterState>) {
+    state.count += 1;
+    cx.notify();
+}
+```
+
+The compiler infers `CounterState` as the component state type from the `increment` command signature. No `@state` needed.
+
+### `SemanticDb` — compiler foundation
+
+```rust
+pub struct SemanticDb {
+    pub commands: HashMap<String, CommandDef>,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+pub struct CommandDef {
+    pub name: String,
+    pub level: CommandLevel,  // Level1, Level2, or Level3
+    pub state_type: Option<String>,
+    pub file: String,
+}
+```
+
+This structure is designed to grow: future versions will add `components`, `state_types`, `props`, and `types` fields, feeding into codegen, LSP metadata, documentation generation, and incremental compilation.
+
+### Future phases
+
+| Phase | Feature | Depends on |
+|-------|---------|-----------|
+| P1 | Command scanning + state inference | ✅ Done |
+| P2 | Typed component props | `SemanticDb.components` + `.fui` attribute validation |
+| P3 | LSP metadata generation | `SemanticDb.to_lsp_metadata()` serialization |
+| P4 | Incremental compilation | `SemanticDb` cache + file-change tracking |
+
+---
+
 ### Known problems, still open
 - **Hot reload in compiled Rust:** candidates — `hot-lib-reloader` (dylib reload) for dev, or fast recompile + restart with incremental compilation.
 - **Imports for `.fui` components:** `use`-style (Rust) vs. file-path (Astro) — still undecided.
-- **`@state` directive** breaks the "frontmatter is pure Rust" rule — needs a better solution post-POC.
 - **GPUI version lock:** the runtime pins a specific GPUI version (currently 0.2.2). GPUI is still evolving rapidly; breaking changes from upstream require manual updates to `fncc-runtime`.

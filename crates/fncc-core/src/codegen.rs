@@ -1,11 +1,11 @@
-use crate::parser::{AttrValue, Document, Element, Node};
+use crate::parser::{self, AttrValue, Document, Element, Node};
 
 pub fn generate(doc: &Document) -> String {
     generate_with_id(doc, 0)
 }
 
 pub fn generate_with_id(doc: &Document, file_id: usize) -> String {
-    generate_with_imports(doc, file_id, &[], None)
+    generate_with_imports(doc, file_id, &[], None, None)
 }
 
 /// Resolved import entry: (tag_name, render_fn_name)
@@ -16,14 +16,17 @@ pub type ResolvedImport<'a> = (&'a str, &'a str);
 /// Generate code for a document with a specific component name.
 /// `component_name` is used for the render function name (derived from the file stem).
 /// If `None`, falls back to the root element name (backward compat).
+/// `resolved_state_type` overrides the document's `@state` directive (used by semantic analysis).
 pub fn generate_with_imports(
     doc: &Document,
     file_id: usize,
     imports: &[ResolvedImport],
     component_name: Option<&str>,
+    resolved_state_type: Option<&str>,
 ) -> String {
     let mut out = String::new();
-    let has_state = doc.state_type.is_some();
+    let state_type = resolved_state_type.or(doc.state_type.as_deref());
+    let has_state = state_type.is_some();
 
     if let Some(ref fm) = doc.frontmatter {
         out.push_str(fm);
@@ -31,7 +34,7 @@ pub fn generate_with_imports(
     }
 
     // collect referenced command names for validation
-    let commands = collect_commands(&doc.root);
+    let commands = parser::collect_commands(&doc.root);
     if !commands.is_empty() {
         out.push_str("#[allow(unused)]\n");
         out.push_str(&format!("fn _fncc_validate_{file_id}() {{\n"));
@@ -43,7 +46,7 @@ pub fn generate_with_imports(
     }
 
     if has_state {
-        generate_stateful(doc, &mut out, imports);
+        generate_stateful(doc, &mut out, imports, state_type);
     } else {
         generate_stateless(doc, &mut out, imports, component_name);
     }
@@ -60,8 +63,8 @@ fn generate_stateless(doc: &Document, out: &mut String, imports: &[ResolvedImpor
     out.push_str("}\n");
 }
 
-fn generate_stateful(doc: &Document, out: &mut String, imports: &[ResolvedImport]) {
-    let state_type = doc.state_type.as_deref().unwrap_or("Self");
+fn generate_stateful(doc: &Document, out: &mut String, imports: &[ResolvedImport], state_type: Option<&str>) {
+    let state_type = state_type.unwrap_or("Self");
 
     out.push_str(&format!("impl Render for {state_type} {{\n"));
     out.push_str("    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {\n");
@@ -292,24 +295,6 @@ pub(crate) fn to_snake_case(name: &str) -> String {
     result
 }
 
-fn collect_commands(el: &Element) -> Vec<String> {
-    let mut cmds = Vec::new();
-    for (key, val) in &el.attrs {
-        if key == "onclick"
-            && let AttrValue::String(name) = val
-            && !cmds.contains(name)
-        {
-            cmds.push(name.clone());
-        }
-    }
-    for child in &el.children {
-        if let Node::Element(child_el) = child {
-            cmds.extend(collect_commands(child_el));
-        }
-    }
-    cmds
-}
-
 impl AttrValue {
     fn as_str(&self) -> &str {
         match self {
@@ -523,7 +508,7 @@ mod tests {
     fn test_imported_element_generates_render_call() {
         let doc = parse("<Stack><Header /></Stack>").unwrap();
         let imports: &[(&str, &str)] = &[("Header", "render_header")];
-        let out = generate_with_imports(&doc, 0, imports, None);
+        let out = generate_with_imports(&doc, 0, imports, None, None);
         assert!(out.contains("render_header()"));
     }
 
@@ -532,7 +517,7 @@ mod tests {
         let src = "---\n@state AppState\n---\n<Stack><Footer /></Stack>";
         let doc = parse(src).unwrap();
         let imports: &[(&str, &str)] = &[("Footer", "render_footer")];
-        let out = generate_with_imports(&doc, 0, imports, None);
+        let out = generate_with_imports(&doc, 0, imports, None, None);
         assert!(out.contains("render_footer()"));
     }
 
@@ -540,7 +525,7 @@ mod tests {
     fn test_gpui_import_falls_back_to_div() {
         let doc = parse("<Stack><TextInput /></Stack>").unwrap();
         let imports: &[(&str, &str)] = &[("TextInput", "")];
-        let out = generate_with_imports(&doc, 0, imports, None);
+        let out = generate_with_imports(&doc, 0, imports, None, None);
         // GPUI imports have empty render fn — fall through to div
         assert!(out.contains("div()"));
     }
@@ -549,7 +534,7 @@ mod tests {
     fn test_builtin_takes_precedence_over_import() {
         let doc = parse("<Text>hello</Text>").unwrap();
         let imports: &[(&str, &str)] = &[("Text", "render_text")];
-        let out = generate_with_imports(&doc, 0, imports, None);
+        let out = generate_with_imports(&doc, 0, imports, None, None);
         // Built-in "Text" handling takes precedence, not render_text()
         assert!(out.contains(".child(\"hello\")"));
     }
@@ -558,14 +543,14 @@ mod tests {
     fn test_imported_element_with_custom_component_name() {
         let doc = parse("<Stack><MyHeader /></Stack>").unwrap();
         let imports: &[(&str, &str)] = &[("MyHeader", "render_header")];
-        let out = generate_with_imports(&doc, 0, imports, None);
+        let out = generate_with_imports(&doc, 0, imports, None, None);
         assert!(out.contains("render_header()"));
     }
 
     #[test]
     fn test_render_fn_name_uses_component_name_arg() {
         let doc = parse("<Text>hello</Text>").unwrap();
-        let out = generate_with_imports(&doc, 0, &[], Some("CustomWidget"));
+        let out = generate_with_imports(&doc, 0, &[], Some("CustomWidget"), None);
         assert!(out.contains("pub fn render_custom_widget()"));
         // Should NOT use root element name
         assert!(!out.contains("pub fn render_text()"));

@@ -1,0 +1,4 @@
+<Stack direction="vertical" gap="12">
+    <Text size="xl">Counter: {state.count}</Text>
+    <Button onclick="increment">+1</Button>
+</Stack>
