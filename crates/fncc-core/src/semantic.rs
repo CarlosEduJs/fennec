@@ -32,6 +32,11 @@ pub enum Diagnostic {
         fui_file: String,
         types: Vec<String>,
     },
+    DuplicateCommand {
+        name: String,
+        first_file: String,
+        second_file: String,
+    },
 }
 
 impl std::fmt::Display for Diagnostic {
@@ -60,6 +65,16 @@ impl std::fmt::Display for Diagnostic {
                     types.join(", ")
                 )
             }
+            Diagnostic::DuplicateCommand {
+                name,
+                first_file,
+                second_file,
+            } => {
+                write!(
+                    f,
+                    "duplicate `#[fncc::command] fn {name}()` found in '{first_file}' and '{second_file}' — command names must be unique"
+                )
+            }
         }
     }
 }
@@ -81,7 +96,15 @@ pub fn analyze_rs_files(src_dir: &Path) -> Result<SemanticDb, anyhow::Error> {
         let file_name = path.to_string_lossy().to_string();
         let commands = extract_commands(&content, &file_name);
         for cmd in commands {
-            db.commands.entry(cmd.name.clone()).or_insert(cmd);
+            if let Some(existing) = db.commands.get(&cmd.name) {
+                db.diagnostics.push(Diagnostic::DuplicateCommand {
+                    name: cmd.name.clone(),
+                    first_file: existing.file.clone(),
+                    second_file: cmd.file,
+                });
+            } else {
+                db.commands.insert(cmd.name.clone(), cmd);
+            }
         }
     }
 
@@ -111,38 +134,46 @@ fn extract_commands(content: &str, file_name: &str) -> Vec<CommandDef> {
     };
 
     let mut commands = Vec::new();
-    for item in &syntax.items {
-        let func = match item {
-            Item::Fn(f) => f,
-            _ => continue,
-        };
-
-        if !is_command_attr(&func.attrs) {
-            continue;
-        }
-
-        let name = func.sig.ident.to_string();
-        let arg_count = func.sig.inputs.len();
-
-        let (level, state_type) = match arg_count {
-            0 => (CommandLevel::Level1, None),
-            1 => (CommandLevel::Level2, None),
-            2 => {
-                let st = extract_state_type_from_first_arg(&func.sig.inputs);
-                (CommandLevel::Level3, st)
-            }
-            _ => continue,
-        };
-
-        commands.push(CommandDef {
-            name,
-            level,
-            state_type,
-            file: file_name.to_string(),
-        });
-    }
-
+    extract_from_items(&syntax.items, file_name, &mut commands);
     commands
+}
+
+fn extract_from_items(items: &[Item], file_name: &str, commands: &mut Vec<CommandDef>) {
+    for item in items {
+        match item {
+            Item::Fn(func) => {
+                if !is_command_attr(&func.attrs) {
+                    continue;
+                }
+
+                let name = func.sig.ident.to_string();
+                let arg_count = func.sig.inputs.len();
+
+                let (level, state_type) = match arg_count {
+                    0 => (CommandLevel::Level1, None),
+                    1 => (CommandLevel::Level2, None),
+                    2 => {
+                        let st = extract_state_type_from_first_arg(&func.sig.inputs);
+                        (CommandLevel::Level3, st)
+                    }
+                    _ => continue,
+                };
+
+                commands.push(CommandDef {
+                    name,
+                    level,
+                    state_type,
+                    file: file_name.to_string(),
+                });
+            }
+            Item::Mod(m) => {
+                if let Some((_, nested_items)) = &m.content {
+                    extract_from_items(nested_items, file_name, commands);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 fn is_command_attr(attrs: &[Attribute]) -> bool {
@@ -336,5 +367,104 @@ fn bar() {}
     fn test_extract_syntax_error_skips_file() {
         let cmds = extract_commands("this is not valid rust @@@", "bad.rs");
         assert!(cmds.is_empty());
+    }
+
+    #[test]
+    fn test_extract_commands_from_inline_module() {
+        let src = r#"
+mod handlers {
+    #[fncc::command]
+    fn handle_click(_: &ClickEvent) {}
+
+    mod nested {
+        #[fncc::command]
+        fn deep(state: &mut Inner, cx: &mut Context<Inner>) {}
+    }
+}
+
+#[fncc::command]
+fn top_level() {}
+"#;
+        let cmds = extract_commands(src, "test.rs");
+        assert_eq!(cmds.len(), 3);
+        let names: Vec<&str> = cmds.iter().map(|c| c.name.as_str()).collect();
+        assert!(names.contains(&"handle_click"));
+        assert!(names.contains(&"deep"));
+        assert!(names.contains(&"top_level"));
+
+        // deep should have Inner as state type
+        let deep = cmds.iter().find(|c| c.name == "deep").unwrap();
+        assert_eq!(deep.state_type.as_deref(), Some("Inner"));
+    }
+
+    #[test]
+    fn test_analyze_rs_files_duplicate_command_detected() {
+        let dir = std::env::temp_dir().join("fncc_semantic_test_dup");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        std::fs::write(dir.join("a.rs"), "#[fncc::command]\nfn foo() {}\n").unwrap();
+        std::fs::write(dir.join("b.rs"), "#[fncc::command]\nfn foo() {}\n").unwrap();
+
+        let db = analyze_rs_files(&dir).unwrap();
+        // Should still have foo (first one wins)
+        assert_eq!(db.commands.len(), 1);
+        assert!(db.commands.contains_key("foo"));
+        // Should have a duplicate diagnostic
+        assert_eq!(db.diagnostics.len(), 1);
+        let diag = &db.diagnostics[0];
+        match diag {
+            Diagnostic::DuplicateCommand { name, .. } => assert_eq!(name, "foo"),
+            other => panic!("expected DuplicateCommand, got {other:?}"),
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_diagnostic_display_duplicate_command() {
+        let d = Diagnostic::DuplicateCommand {
+            name: "foo".into(),
+            first_file: "a.rs".into(),
+            second_file: "b.rs".into(),
+        };
+        let msg = d.to_string();
+        assert!(msg.contains("duplicate"));
+        assert!(msg.contains("foo"));
+        assert!(msg.contains("a.rs"));
+        assert!(msg.contains("b.rs"));
+    }
+
+    #[test]
+    fn test_analyze_rs_files_unique_commands_no_diagnostics() {
+        let dir = std::env::temp_dir().join("fncc_semantic_test_unique");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        std::fs::write(dir.join("a.rs"), "#[fncc::command]\nfn foo() {}\n").unwrap();
+        std::fs::write(dir.join("b.rs"), "#[fncc::command]\nfn bar() {}\n").unwrap();
+
+        let db = analyze_rs_files(&dir).unwrap();
+        assert_eq!(db.commands.len(), 2);
+        assert!(db.diagnostics.is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_analyze_rs_files_duplicate_deterministic_first_wins() {
+        // Regardless of file traversal order, the first definition encountered
+        // is retained and the second is a diagnostic.
+        let dir = std::env::temp_dir().join("fncc_semantic_test_dup_det");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        std::fs::write(dir.join("z_first.rs"), "#[fncc::command]\nfn cmd() {}\n").unwrap();
+        std::fs::write(dir.join("a_second.rs"), "#[fncc::command]\nfn cmd() {}\n").unwrap();
+
+        let db = analyze_rs_files(&dir).unwrap();
+        assert_eq!(db.diagnostics.len(), 1);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

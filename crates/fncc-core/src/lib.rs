@@ -122,6 +122,7 @@ pub fn generate_all_with_options(opts: GenerateOptions) -> Result<()> {
     // Semantic analysis (optional): scan .rs files for #[fncc::command]
     let semantic_db = if let Some(src_dir) = opts.src_dir {
         let db = semantic::analyze_rs_files(src_dir)?;
+        // Extraction-level diagnostics (e.g. duplicate commands) are hard errors
         if let Some(diag) = db.diagnostics.first() {
             anyhow::bail!("{}", diag);
         }

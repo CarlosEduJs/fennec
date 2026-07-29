@@ -320,11 +320,11 @@ watch = ["src/ui", "src"]
 
 ## 6. Semantic Analysis
 
-Introduced in `fncc-core 0.4.0` — a build-time view into the Rust source that enables state inference, command validation, and future features like typed props and LSP.
+Introduced in `fncc-core` — a build-time view into the Rust source that enables state inference, command validation, and future features like typed props and LSP.
 
 ### Architecture
 
-```
+```text
 ┌─────────────────────┐
 │  .rs files           │
 │  (main.rs, etc.)     │──→ semantic::analyze_rs_files() → SemanticDb
@@ -347,9 +347,9 @@ Apps opt into semantic analysis by setting `src_dir` in `GenerateOptions`:
 ```rust
 // build.rs — new API
 fncc_core::generate_all_with_options(fncc_core::GenerateOptions {
-    ui_dir: Path::new("src/ui"),
+    ui_dir: std::path::Path::new("src/ui"),
     out_file: &out_file,
-    src_dir: Some(Path::new("src")),  // enables semantic analysis
+    src_dir: Some(std::path::Path::new("src")),  // enables semantic analysis
 }).unwrap();
 ```
 
