@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'crates/**'
+      - 'apps/**'
+      - 'xtask/**'
+      - '.changes/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/*.yml'
+      - '.rustfmt.toml'
+      - 'clippy.toml'
+      - 'taplo.toml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'crates/**'
+      - 'apps/**'
+      - 'xtask/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/*.yml'
+      - '.rustfmt.toml'
+      - 'clippy.toml'
+      - 'taplo.toml'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: fmt + clippy + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies (gpui)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install taplo
+        run: cargo install taplo-cli --locked
+
+      - name: Check TOML formatting
+        run: taplo format --check
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Run tests
+        run: cargo test --workspace

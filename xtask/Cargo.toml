@@ -1,16 +1,16 @@
 [package]
-name = "xtask"
-version = "0.1.0"
 edition = "2024"
+name = "xtask"
 publish = false
+version = "0.1.0"
 
 [dependencies]
+anyhow = "1.0"
+chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
+semver = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml_ng = "0.10"
-semver = "1.0"
 toml_edit = "0.22"
 walkdir = "2"
-chrono = "0.4"
-anyhow = "1.0"

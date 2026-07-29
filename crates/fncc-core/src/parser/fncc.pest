@@ -1,4 +1,4 @@
-document = { SOI ~ frontmatter? ~ WS? ~ element ~ WS? ~ EOI }
+document = { SOI ~ frontmatter? ~ WS* ~ element ~ WS* ~ EOI }
 
 frontmatter = { "---" ~ (!("---") ~ ANY)* ~ "---" ~ WS? }
 
@@ -14,7 +14,7 @@ close_tag = { "</" ~ tag_name ~ WS? ~ ">" }
 tag_name = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | "-")* }
 
 attr = { attr_name ~ "=" ~ attr_value }
-attr_name = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
+attr_name = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | "-")* }
 
 attr_value = { "\"" ~ (escape | (!"\"" ~ ANY))* ~ "\"" | interpolation }
 

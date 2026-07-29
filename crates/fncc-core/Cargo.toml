@@ -1,12 +1,15 @@
 [package]
-name = "fncc-core"
-version = "0.1.0"
-edition = "2024"
 description = "Parser and codegen for the fncc native UI framework — compiles .fui files to GPUI Rust code"
-license = "Apache-2.0"
-repository = "https://github.com/carlosedujs/fncc"
+edition = "2024"
 homepage = "https://github.com/carlosedujs/fncc"
+license = "Apache-2.0"
+name = "fncc-core"
+repository = "https://github.com/carlosedujs/fncc"
+version = "0.1.0"
 
 [dependencies]
+anyhow = "1"
 pest = "2"
 pest_derive = "2"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"

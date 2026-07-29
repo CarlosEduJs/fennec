@@ -1807,8 +1807,11 @@ dependencies = [
 name = "fncc-core"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "pest",
  "pest_derive",
+ "serde",
+ "toml 0.8.23",
 ]
 
 [[package]]

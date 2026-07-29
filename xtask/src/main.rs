@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use chrono::Local;
 use clap::{Parser, Subcommand};
 use semver::Version;
@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use toml_edit::{value, DocumentMut};
+use toml_edit::{DocumentMut, value};
 use walkdir::WalkDir;
 
 #[derive(Parser)]
@@ -128,20 +128,20 @@ fn find_workspace_root() -> Result<PathBuf> {
     let mut current = std::env::current_dir()?;
     loop {
         let cargo_toml = current.join("Cargo.toml");
-        if cargo_toml.exists() {
-            if let Ok(content) = fs::read_to_string(&cargo_toml) {
-                if let Ok(doc) = content.parse::<DocumentMut>() {
-                    if doc.contains_key("workspace") {
-                        return Ok(current);
-                    }
-                }
-            }
+        if cargo_toml.exists()
+            && let Ok(content) = fs::read_to_string(&cargo_toml)
+            && let Ok(doc) = content.parse::<DocumentMut>()
+            && doc.contains_key("workspace")
+        {
+            return Ok(current);
         }
         if !current.pop() {
             break;
         }
     }
-    Err(anyhow!("No Cargo.toml containing a [workspace] table found in current directory or any parent directories."))
+    Err(anyhow!(
+        "No Cargo.toml containing a [workspace] table found in current directory or any parent directories."
+    ))
 }
 
 fn get_workspace_crates_internal(root: &Path, include_non_publishable: bool) -> Result<HashMap<String, PathBuf>> {
@@ -151,24 +151,24 @@ fn get_workspace_crates_internal(root: &Path, include_non_publishable: bool) -> 
 
     let mut crates = HashMap::new();
 
-    if let Some(workspace) = doc.get("workspace").and_then(|w| w.as_table()) {
-        if let Some(members) = workspace.get("members").and_then(|m| m.as_array()) {
-            for member in members {
-                if let Some(rel_path) = member.as_str() {
-                    let crate_toml = root.join(rel_path).join("Cargo.toml");
-                    if crate_toml.exists() {
-                        let c_content = fs::read_to_string(&crate_toml)?;
-                        let c_doc: DocumentMut = c_content.parse()?;
-                        if let Some(pkg) = c_doc.get("package").and_then(|p| p.as_table_like()) {
-                            let is_publish_false = pkg.get("publish").and_then(|p| p.as_bool()) == Some(false);
-                            if is_publish_false && !include_non_publishable {
-                                continue;
-                            }
-                            if let Some(name) = pkg.get("name").and_then(|n| n.as_str()) {
-                                if name != "xtask" {
-                                    crates.insert(name.to_string(), root.join(rel_path));
-                                }
-                            }
+    if let Some(workspace) = doc.get("workspace").and_then(|w| w.as_table())
+        && let Some(members) = workspace.get("members").and_then(|m| m.as_array())
+    {
+        for member in members {
+            if let Some(rel_path) = member.as_str() {
+                let crate_toml = root.join(rel_path).join("Cargo.toml");
+                if crate_toml.exists() {
+                    let c_content = fs::read_to_string(&crate_toml)?;
+                    let c_doc: DocumentMut = c_content.parse()?;
+                    if let Some(pkg) = c_doc.get("package").and_then(|p| p.as_table_like()) {
+                        let is_publish_false = pkg.get("publish").and_then(|p| p.as_bool()) == Some(false);
+                        if is_publish_false && !include_non_publishable {
+                            continue;
+                        }
+                        if let Some(name) = pkg.get("name").and_then(|n| n.as_str())
+                            && name != "xtask"
+                        {
+                            crates.insert(name.to_string(), root.join(rel_path));
                         }
                     }
                 }
@@ -200,7 +200,10 @@ fn run_change(root: &Path, krate: Option<String>, bump: Option<String>, message:
     let selected_crate = match krate {
         Some(k) => {
             if !available_crates.contains_key(&k) {
-                return Err(anyhow!("Crate '{k}' not found in the workspace. Available crates: {:?}", list));
+                return Err(anyhow!(
+                    "Crate '{k}' not found in the workspace. Available crates: {:?}",
+                    list
+                ));
             }
             k
         }
@@ -272,9 +275,7 @@ fn run_change(root: &Path, krate: Option<String>, bump: Option<String>, message:
         BumpType::Major => "major",
     };
 
-    let file_content = format!(
-        "---\n{selected_crate}: {bump_str}\n---\n\n- {summary}\n"
-    );
+    let file_content = format!("---\n{selected_crate}: {bump_str}\n---\n\n- {summary}\n");
 
     fs::write(&filepath, file_content)?;
     println!("✅ Change registered successfully in: .changes/{filename}");
@@ -293,7 +294,7 @@ fn parse_change_files(root: &Path) -> Result<Vec<ChangeFile>> {
     for entry in WalkDir::new(&changes_dir).min_depth(1).max_depth(1) {
         let entry = entry?;
         let path = entry.path();
-        if path.is_file() && path.extension().map_or(false, |ext| ext == "md") {
+        if path.is_file() && path.extension().is_some_and(|ext| ext == "md") {
             let filename = path.file_name().unwrap().to_string_lossy();
             if filename == "README.md" || filename.starts_with('.') {
                 continue;
@@ -350,14 +351,21 @@ fn run_check(root: &Path) -> Result<()> {
     let mut has_error = false;
     for cf in &change_files {
         println!("🔍 Verifying: {}", cf.path.display());
-        for (krate, _bump) in &cf.crate_bumps {
+        for krate in cf.crate_bumps.keys() {
             if !available_crates.contains_key(krate) {
-                println!("❌ Error in {}: Crate '{}' does not exist in workspace.", cf.path.display(), krate);
+                println!(
+                    "❌ Error in {}: Crate '{}' does not exist in workspace.",
+                    cf.path.display(),
+                    krate
+                );
                 has_error = true;
             }
         }
         if cf.summary.is_empty() {
-            println!("❌ Error in {}: Change summary description is empty.", cf.path.display());
+            println!(
+                "❌ Error in {}: Change summary description is empty.",
+                cf.path.display()
+            );
             has_error = true;
         }
     }
@@ -386,7 +394,10 @@ fn collect_bump_plan(root: &Path) -> Result<BumpPlan> {
     for cf in &change_files {
         for (krate, bump_type) in &cf.crate_bumps {
             if !available_crates.contains_key(krate) {
-                return Err(anyhow!("Unknown crate '{krate}' referenced in change file: {}", cf.path.display()));
+                return Err(anyhow!(
+                    "Unknown crate '{krate}' referenced in change file: {}",
+                    cf.path.display()
+                ));
             }
             highest_bumps
                 .entry(krate.clone())
@@ -416,25 +427,25 @@ fn collect_bump_plan(root: &Path) -> Result<BumpPlan> {
                 continue;
             }
             let cargo_toml_path = crate_dir.join("Cargo.toml");
-            if let Ok(content) = fs::read_to_string(&cargo_toml_path) {
-                if let Ok(doc) = content.parse::<DocumentMut>() {
-                    for dep_section in ["dependencies", "dev-dependencies", "build-dependencies"] {
-                        if let Some(deps) = doc.get(dep_section).and_then(|d| d.as_table_like()) {
-                            for (dep_name, _) in deps.iter() {
-                                if current_bumped.contains(&dep_name.to_string()) {
-                                    highest_bumps.insert(krate.clone(), BumpType::Patch);
-                                    crate_summaries
-                                        .entry(krate.clone())
-                                        .or_default()
-                                        .push("Updated internal workspace dependency version references.".to_string());
-                                    changed = true;
-                                    break;
-                                }
+            if let Ok(content) = fs::read_to_string(&cargo_toml_path)
+                && let Ok(doc) = content.parse::<DocumentMut>()
+            {
+                for dep_section in ["dependencies", "dev-dependencies", "build-dependencies"] {
+                    if let Some(deps) = doc.get(dep_section).and_then(|d| d.as_table_like()) {
+                        for (dep_name, _) in deps.iter() {
+                            if current_bumped.contains(&dep_name.to_string()) {
+                                highest_bumps.insert(krate.clone(), BumpType::Patch);
+                                crate_summaries
+                                    .entry(krate.clone())
+                                    .or_default()
+                                    .push("Updated internal workspace dependency version references.".to_string());
+                                changed = true;
+                                break;
                             }
                         }
-                        if changed {
-                            break;
-                        }
+                    }
+                    if changed {
+                        break;
                     }
                 }
             }
@@ -496,7 +507,7 @@ fn run_bump(root: &Path, dry_run: bool) -> Result<()> {
     if !new_versions.is_empty() {
         println!("🔗 Updating inter-crate dependency version references...");
         let all_crates = get_all_workspace_crates(root)?;
-        for (_krate, crate_dir) in &all_crates {
+        for crate_dir in all_crates.values() {
             let cargo_toml_path = crate_dir.join("Cargo.toml");
             let content = fs::read_to_string(&cargo_toml_path)?;
             let mut doc: DocumentMut = content.parse()?;
@@ -511,11 +522,11 @@ fn run_bump(root: &Path, dry_run: bool) -> Result<()> {
                                     table.insert("version", new_v.as_str().into());
                                     modified = true;
                                 }
-                            } else if let Some(table) = dep_item.as_table_mut() {
-                                if table.contains_key("path") {
-                                    table.insert("version", value(new_v.as_str()));
-                                    modified = true;
-                                }
+                            } else if let Some(table) = dep_item.as_table_mut()
+                                && table.contains_key("path")
+                            {
+                                table.insert("version", value(new_v.as_str()));
+                                modified = true;
                             }
                         }
                     }
@@ -562,7 +573,9 @@ fn update_crate_changelog(
     let mut old_content = if changelog_path.exists() {
         fs::read_to_string(&changelog_path)?
     } else {
-        format!("# Changelog - {krate_name}\n\nAll notable changes to this project will be documented in this file.\n\n")
+        format!(
+            "# Changelog - {krate_name}\n\nAll notable changes to this project will be documented in this file.\n\n"
+        )
     };
 
     let mut entry = format!("## [{new_version}] - {date}\n\n");
@@ -609,7 +622,13 @@ fn get_latest_changelog_notes(crate_dir: &Path, version: &str) -> String {
     }
 }
 
-fn create_tag_and_github_release(krate: &str, version: &str, crate_dir: &Path, execute: bool, dry_run: bool) -> Result<()> {
+fn create_tag_and_github_release(
+    krate: &str,
+    version: &str,
+    crate_dir: &Path,
+    execute: bool,
+    dry_run: bool,
+) -> Result<()> {
     let tag = format!("{krate}-v{version}");
     let notes = get_latest_changelog_notes(crate_dir, version);
 
@@ -719,7 +738,9 @@ fn generate_release_plan_markdown(root: &Path) -> Result<Option<String>> {
 
     let mut md = String::new();
     md.push_str("# 📦 Release Packages\n\n");
-    md.push_str("This PR accumulates version updates and release notes for crates based on pending changes in `.changes/`.\n\n");
+    md.push_str(
+        "This PR accumulates version updates and release notes for crates based on pending changes in `.changes/`.\n\n",
+    );
 
     md.push_str("### 📋 Summary of Version Bumps\n\n");
     md.push_str("| Crate | Current Version | New Version | Type |\n");
@@ -735,9 +756,7 @@ fn generate_release_plan_markdown(root: &Path) -> Result<Option<String>> {
             let cargo_toml_path = crate_dir.join("Cargo.toml");
             let content = fs::read_to_string(&cargo_toml_path)?;
             let doc: DocumentMut = content.parse()?;
-            let current_version_str = doc["package"]["version"]
-                .as_str()
-                .unwrap_or("0.0.0");
+            let current_version_str = doc["package"]["version"].as_str().unwrap_or("0.0.0");
             let current_version = Version::parse(current_version_str)?;
             let new_version = bump_type.apply(&current_version);
             let bump_str = match bump_type {
@@ -800,7 +819,9 @@ fn run_release_pr(root: &Path, base: &str) -> Result<()> {
     println!("📄 Release report generated! Applying version bumps...");
 
     if let Err(e) = run_bump(root, false) {
-        return Err(anyhow!("Failed during run_bump. Version bumps were not applied completely: {e}"));
+        return Err(anyhow!(
+            "Failed during run_bump. Version bumps were not applied completely: {e}"
+        ));
     }
 
     let pr_body_file = root.join(".changes_pr_body.md");
@@ -813,25 +834,40 @@ fn run_release_pr(root: &Path, base: &str) -> Result<()> {
     let head_branch = "chore/release-packages";
 
     let list_output = std::process::Command::new("gh")
-        .args(["pr", "list", "--base", base, "--head", head_branch, "--json", "number,title"])
+        .args([
+            "pr",
+            "list",
+            "--base",
+            base,
+            "--head",
+            head_branch,
+            "--json",
+            "number,title",
+        ])
         .output();
 
-    if let Ok(out) = list_output {
-        if let Ok(prs) = serde_json::from_slice::<Vec<serde_json::Value>>(&out.stdout) {
-            if let Some(pr) = prs.first() {
-                if let Some(num) = pr["number"].as_u64() {
-                    let pr_num = num.to_string();
-                    println!("🔄 Updating existing Release PR #{pr_num}...");
-                    let edit_status = std::process::Command::new("gh")
-                        .args(["pr", "edit", &pr_num, "--title", pr_title, "--body-file", pr_body_file.to_str().unwrap()])
-                        .status();
-                    let _ = fs::remove_file(&pr_body_file);
-                    if edit_status.map_or(false, |s| s.success()) {
-                        println!("✅ Release PR #{pr_num} updated successfully!");
-                        return Ok(());
-                    }
-                }
-            }
+    if let Ok(out) = list_output
+        && let Ok(prs) = serde_json::from_slice::<Vec<serde_json::Value>>(&out.stdout)
+        && let Some(pr) = prs.first()
+        && let Some(num) = pr["number"].as_u64()
+    {
+        let pr_num = num.to_string();
+        println!("🔄 Updating existing Release PR #{pr_num}...");
+        let edit_status = std::process::Command::new("gh")
+            .args([
+                "pr",
+                "edit",
+                &pr_num,
+                "--title",
+                pr_title,
+                "--body-file",
+                pr_body_file.to_str().unwrap(),
+            ])
+            .status();
+        let _ = fs::remove_file(&pr_body_file);
+        if edit_status.is_ok_and(|s| s.success()) {
+            println!("✅ Release PR #{pr_num} updated successfully!");
+            return Ok(());
         }
     }
 
@@ -851,7 +887,7 @@ fn run_release_pr(root: &Path, base: &str) -> Result<()> {
         ])
         .status();
 
-    if create_status.map_or(false, |s| s.success()) {
+    if create_status.is_ok_and(|s| s.success()) {
         let _ = fs::remove_file(&pr_body_file);
         println!("🎉 Release PR created successfully!");
     } else {
