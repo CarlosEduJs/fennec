@@ -7,9 +7,24 @@ pub struct FnccParser;
 use pest::iterators::Pair;
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct ComponentImport {
+    pub name: String,
+    pub source: ImportSource,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ImportSource {
+    /// Path to another .fui file, e.g. "ui::components::Button"
+    FuiPath(String),
+    /// A GPUI native component, e.g. `use gpui::TextInput;`
+    Gpui,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Document {
     pub frontmatter: Option<String>,
     pub state_type: Option<String>,
+    pub imports: Vec<ComponentImport>,
     pub root: Element,
 }
 
@@ -40,6 +55,7 @@ pub fn parse(source: &str) -> Result<Document, String> {
 
     let mut frontmatter = None;
     let mut state_type = None;
+    let mut imports = Vec::new();
     let mut root = None;
 
     for inner in pair.into_inner() {
@@ -52,16 +68,28 @@ pub fn parse(source: &str) -> Result<Document, String> {
                     .map(|s| s.trim().to_string());
 
                 if let Some(ref raw) = content {
-                    // extract @state directive
+                    // extract @state directive and component imports
                     let mut clean_lines = Vec::new();
+                    let mut component_imports = Vec::new();
                     for line in raw.lines() {
                         let trimmed = line.trim();
                         if let Some(st) = trimmed.strip_prefix("@state ") {
                             state_type = Some(st.trim().to_string());
+                        } else if is_component_import_line(trimmed) {
+                            if let Some(imports) = parse_component_imports(trimmed) {
+                                component_imports.extend(imports);
+                            }
+                            // Only strip from emitted Rust if it's a .fui import,
+                            // not a gpui import (those are real Rust)
+                            if !trimmed.starts_with("use gpui::") {
+                                continue;
+                            }
+                            clean_lines.push(line);
                         } else {
                             clean_lines.push(line);
                         }
                     }
+                    imports = component_imports;
                     let clean = clean_lines.join("\n");
                     if !clean.trim().is_empty() {
                         frontmatter = Some(clean);
@@ -78,6 +106,7 @@ pub fn parse(source: &str) -> Result<Document, String> {
     Ok(Document {
         frontmatter,
         state_type,
+        imports,
         root: root.expect("document must have a root element"),
     })
 }
@@ -188,6 +217,74 @@ fn parse_attr(pair: Pair<Rule>) -> (String, AttrValue) {
     }
 
     (attr_name, attr_value)
+}
+
+/// Check if a trimmed line is a component import (`use ui::...` or `use gpui::...`)
+fn is_component_import_line(line: &str) -> bool {
+    (line.starts_with("use ui::") || line.starts_with("use gpui::")) && line.ends_with(';')
+}
+
+/// Parse component imports from a `use` line.
+/// Supports:
+/// - `use ui::components::Button;`
+/// - `use ui::components::{Button, Input};`
+/// - `use gpui::TextInput;`
+fn parse_component_imports(line: &str) -> Option<Vec<ComponentImport>> {
+    let trimmed = line.strip_prefix("use ")?.strip_suffix(';')?.trim();
+    if trimmed.starts_with("ui::") {
+        parse_fui_imports(trimmed)
+    } else if trimmed.starts_with("gpui::") {
+        parse_gpui_imports(trimmed)
+    } else {
+        None
+    }
+}
+
+fn parse_fui_imports(path: &str) -> Option<Vec<ComponentImport>> {
+    // Remove leading "ui::"
+    let rest = path.strip_prefix("ui::")?;
+    if let Some(brace_start) = rest.find('{') {
+        // Grouped: "components::{Button, Input}"
+        let prefix = rest[..brace_start].trim_end_matches("::");
+        let inner = &rest[brace_start + 1..];
+        let inner = inner.split('}').next()?.trim();
+        let names: Vec<String> = inner
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if names.is_empty() {
+            return None;
+        }
+        Some(
+            names
+                .into_iter()
+                .map(|name| ComponentImport {
+                    name: name.clone(),
+                    source: ImportSource::FuiPath(format!("ui::{}::{}", prefix, name)),
+                })
+                .collect(),
+        )
+    } else {
+        // Simple: "components::Button"
+        let name = rest.split("::").last()?.to_string();
+        Some(vec![ComponentImport {
+            name: name.clone(),
+            source: ImportSource::FuiPath(format!("ui::{}", rest)),
+        }])
+    }
+}
+
+fn parse_gpui_imports(path: &str) -> Option<Vec<ComponentImport>> {
+    let name = path.strip_prefix("gpui::")?;
+    // No grouped imports for gpui (for now)
+    if name.contains('{') || name.contains('}') || name.contains("::") {
+        return None;
+    }
+    Some(vec![ComponentImport {
+        name: name.to_string(),
+        source: ImportSource::Gpui,
+    }])
 }
 
 #[cfg(test)]
@@ -511,5 +608,93 @@ mod tests {
         assert_eq!(doc.root.children[0], Node::Text("Count:".into()));
         assert_eq!(doc.root.children[1], Node::Interpolation("count".into()));
         assert_eq!(doc.root.children[2], Node::Text("items".into()));
+    }
+
+    // --- Component imports ---
+
+    #[test]
+    fn test_simple_use_ui_import() {
+        let doc = parse("---\nuse ui::components::Button;\n---\n<Stack></Stack>").unwrap();
+        assert_eq!(doc.imports.len(), 1);
+        assert_eq!(doc.imports[0].name, "Button");
+        assert_eq!(
+            doc.imports[0].source,
+            ImportSource::FuiPath("ui::components::Button".into())
+        );
+    }
+
+    #[test]
+    fn test_use_ui_import_stripped_from_frontmatter() {
+        let doc = parse("---\nuse ui::components::Button;\n---\n<Stack></Stack>").unwrap();
+        assert!(doc.frontmatter.is_none());
+    }
+
+    #[test]
+    fn test_use_crate_import_preserved() {
+        let doc = parse("---\nuse crate::lib::State;\n---\n<App></App>").unwrap();
+        assert_eq!(doc.frontmatter, Some("use crate::lib::State;".to_string()));
+        assert!(doc.imports.is_empty());
+    }
+
+    #[test]
+    fn test_use_ui_and_crate_mixed() {
+        let src = "---\nuse crate::prelude::*;\nuse ui::components::Header;\n---\n<App></App>";
+        let doc = parse(src).unwrap();
+        assert_eq!(doc.imports.len(), 1);
+        assert_eq!(doc.imports[0].name, "Header");
+        assert!(doc.frontmatter.as_ref().unwrap().contains("use crate::prelude::*;"));
+        assert!(!doc.frontmatter.as_ref().unwrap().contains("use ui::"));
+    }
+
+    #[test]
+    fn test_grouped_use_ui_import() {
+        let src = "---\nuse ui::components::{Button, Input, Card};\n---\n<Stack></Stack>";
+        let doc = parse(src).unwrap();
+        assert_eq!(doc.imports.len(), 3);
+        assert_eq!(doc.imports[0].name, "Button");
+        assert_eq!(doc.imports[1].name, "Input");
+        assert_eq!(doc.imports[2].name, "Card");
+        for imp in &doc.imports {
+            match &imp.source {
+                ImportSource::FuiPath(p) => assert!(p.starts_with("ui::components::")),
+                _ => panic!("expected FuiPath"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_use_gpui_import_kept_in_frontmatter() {
+        let doc = parse("---\nuse gpui::TextInput;\n---\n<Stack></Stack>").unwrap();
+        assert_eq!(doc.imports.len(), 1);
+        assert_eq!(doc.imports[0].name, "TextInput");
+        assert_eq!(doc.imports[0].source, ImportSource::Gpui);
+        // gpui imports are real Rust — stay in frontmatter
+        assert!(doc.frontmatter.as_ref().unwrap().contains("use gpui::TextInput;"));
+    }
+
+    #[test]
+    fn test_use_ui_with_state_and_imports() {
+        let src = "---\n@state AppState\nuse ui::components::Header;\n---\n<Stack></Stack>";
+        let doc = parse(src).unwrap();
+        assert_eq!(doc.state_type, Some("AppState".into()));
+        assert_eq!(doc.imports.len(), 1);
+        assert_eq!(doc.imports[0].name, "Header");
+    }
+
+    #[test]
+    fn test_imports_default_empty() {
+        let doc = parse("<Text>hi</Text>").unwrap();
+        assert!(doc.imports.is_empty());
+    }
+
+    #[test]
+    fn test_use_ui_with_deep_path() {
+        let doc = parse("---\nuse ui::layout::sidebar::SidePanel;\n---\n<Root></Root>").unwrap();
+        assert_eq!(doc.imports.len(), 1);
+        assert_eq!(doc.imports[0].name, "SidePanel");
+        assert_eq!(
+            doc.imports[0].source,
+            ImportSource::FuiPath("ui::layout::sidebar::SidePanel".into())
+        );
     }
 }

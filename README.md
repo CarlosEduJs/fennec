@@ -6,7 +6,7 @@ fncc is a compiler/framework that translates a declarative syntax inspired by As
 
 Write UI with `.fui` files. Compile to a native binary. No Electron, no WebView, GPU-accelerated, low memory.
 
-> **Status:** POC complete. The basic pipeline works end-to-end.
+> **Status:** POC complete — parser, codegen, commands, state, and multi-file component imports all work end-to-end.
 
 ---
 
@@ -69,6 +69,47 @@ fn main() {
 }
 ```
 
+## Component imports
+
+Organize your UI across multiple `.fui` files. Use Rust-style `use` paths in the frontmatter to import components from other files.
+
+```
+src/ui/
+├── App.fui              # imports components/Header.fui, components/Footer.fui
+└── components/
+    ├── Header.fui
+    └── Footer.fui
+```
+
+**`src/ui/components/Header.fui`** — a stateless component:
+```fui
+<Text size="xl">Welcome</Text>
+```
+
+**`src/ui/App.fui`** — imports and uses it:
+```fui
+---
+@state AppState
+use ui::components::Header;
+use ui::components::Footer;
+---
+
+<Stack direction="vertical" gap="16">
+    <Header />
+    <Text>Count: {state.count}</Text>
+    <Button onclick="handle_click">+1</Button>
+    <Footer />
+</Stack>
+```
+
+**Rules:**
+- The `ui::` prefix signals a `.fui` component import: `use ui::path::Name;` → `<ui_dir>/path/Name.fui`
+- Grouped imports work: `use ui::components::{Button, Card};`
+- Imported components must be stateless (no `@state` directive)
+- Render function names derive from the file stem, not the root element — `Header.fui` always produces `render_header()`
+- `use gpui::TextInput;` keeps the real Rust import in emitted code for use in handlers and state types
+- Regular Rust `use crate::...` statements pass through unchanged
+
 ## Architecture
 
 ```
@@ -123,13 +164,18 @@ The macro generates a **trampoline** (`__fncc_cmd_{name}`) that adapts the user'
 - [x] `#[fncc::command]` Level 1, 2, 3
 - [x] Explicit state with `cx.notify()` counter example
 - [x] Command trampoline system
+- [x] Multi-file component imports (`use ui::path::Name;` syntax, recursive scan, import resolution)
 
 ### Next
 - [ ] `fncc` CLI (`fncc build`, `fncc dev`)
-- [ ] Multi-file component imports
 - [ ] More components (Input, Image, List, Scroll)
 - [ ] Hot reload
-- [ ] State type inference (remove `@state` directive)
+- [ ] Semantic analysis
+  - [ ] Rust-powered type system
+  - [ ] Automatic state inference (remove `@state`)
+  - [ ] Typed component props
+  - [ ] Typed command resolution
+  - [ ] LSP metadata generation
 
 ## Related projects
 
