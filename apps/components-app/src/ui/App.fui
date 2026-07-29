@@ -1,7 +1,6 @@
 ---
 @state AppState
-use ui::components::Header;
-use ui::components::Footer;
+use ui::components::{Header, Footer};
 ---
 
 <Stack direction="vertical" gap="16">
