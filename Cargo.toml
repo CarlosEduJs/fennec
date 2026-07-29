@@ -5,6 +5,7 @@ members = [
     "crates/fncc-runtime",
     "crates/fncc",
     "apps/example-app",
+    "apps/components-app",
     "xtask",
 ]
 resolver = "3"

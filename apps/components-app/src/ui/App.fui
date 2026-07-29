@@ -1,0 +1,12 @@
+---
+@state AppState
+use ui::components::Header;
+use ui::components::Footer;
+---
+
+<Stack direction="vertical" gap="16">
+    <Header />
+    <Text>Count: {state.count}</Text>
+    <Button onclick="handle_click">+1</Button>
+    <Footer />
+</Stack>

@@ -5,6 +5,23 @@ pub fn generate(doc: &Document) -> String {
 }
 
 pub fn generate_with_id(doc: &Document, file_id: usize) -> String {
+    generate_with_imports(doc, file_id, &[], None)
+}
+
+/// Resolved import entry: (tag_name, render_fn_name)
+/// - For .fui component imports: ("Header", "render_header")
+/// - For gpui imports: ("TextInput", "") — registered but no special codegen
+pub type ResolvedImport<'a> = (&'a str, &'a str);
+
+/// Generate code for a document with a specific component name.
+/// `component_name` is used for the render function name (derived from the file stem).
+/// If `None`, falls back to the root element name (backward compat).
+pub fn generate_with_imports(
+    doc: &Document,
+    file_id: usize,
+    imports: &[ResolvedImport],
+    component_name: Option<&str>,
+) -> String {
     let mut out = String::new();
     let has_state = doc.state_type.is_some();
 
@@ -26,44 +43,59 @@ pub fn generate_with_id(doc: &Document, file_id: usize) -> String {
     }
 
     if has_state {
-        generate_stateful(doc, &mut out);
+        generate_stateful(doc, &mut out, imports);
     } else {
-        generate_stateless(doc, &mut out);
+        generate_stateless(doc, &mut out, imports, component_name);
     }
 
     out
 }
 
-fn generate_stateless(doc: &Document, out: &mut String) {
-    let fn_name = format!("render_{}", to_snake_case(&doc.root.name));
+fn generate_stateless(doc: &Document, out: &mut String, imports: &[ResolvedImport], component_name: Option<&str>) {
+    let name = component_name.unwrap_or(&doc.root.name);
+    let fn_name = format!("render_{}", to_snake_case(name));
     out.push_str(&format!("pub fn {fn_name}() -> impl IntoElement {{\n"));
-    out.push_str(&generate_element(&doc.root, 1, false));
+    out.push_str(&generate_element(&doc.root, 1, false, imports));
     out.push('\n');
     out.push_str("}\n");
 }
 
-fn generate_stateful(doc: &Document, out: &mut String) {
+fn generate_stateful(doc: &Document, out: &mut String, imports: &[ResolvedImport]) {
     let state_type = doc.state_type.as_deref().unwrap_or("Self");
 
     out.push_str(&format!("impl Render for {state_type} {{\n"));
     out.push_str("    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {\n");
     out.push_str("        let handle = cx.entity().downgrade();\n");
-    out.push_str(&generate_element(&doc.root, 2, true));
+    out.push_str(&generate_element(&doc.root, 2, true, imports));
     out.push_str("\n    }\n");
     out.push_str("}\n");
 }
 
-fn generate_element(el: &Element, depth: usize, stateful: bool) -> String {
+fn generate_element(el: &Element, depth: usize, stateful: bool, imports: &[ResolvedImport]) -> String {
     let indent = "    ".repeat(depth);
+
+    // Built-in elements
     match el.name.as_str() {
-        "Stack" => gen_stack(el, &indent, depth, stateful),
-        "Text" => gen_text(el, &indent, depth, stateful),
-        "Button" => gen_button(el, &indent, depth, stateful),
-        _ => gen_fallback(el, &indent, depth, stateful),
+        "Stack" => return gen_stack(el, &indent, depth, stateful, imports),
+        "Text" => return gen_text(el, &indent, depth, stateful, imports),
+        "Button" => return gen_button(el, &indent, depth, stateful, imports),
+        _ => {}
     }
+
+    // .fui component imports (have a non-empty render function name)
+    if let Some(render_fn) = imports
+        .iter()
+        .find(|(name, fn_name)| name == &el.name && !fn_name.is_empty())
+        .map(|(_, fn_name)| *fn_name)
+    {
+        return format!("{indent}{render_fn}()");
+    }
+
+    // Fallback for gpui imports and unknown elements
+    gen_fallback(el, &indent, depth, stateful, imports)
 }
 
-fn gen_stack(el: &Element, indent: &str, depth: usize, stateful: bool) -> String {
+fn gen_stack(el: &Element, indent: &str, depth: usize, stateful: bool, imports: &[ResolvedImport]) -> String {
     let mut out = format!("{indent}div()\n");
 
     let mut is_vertical = false;
@@ -90,7 +122,7 @@ fn gen_stack(el: &Element, indent: &str, depth: usize, stateful: bool) -> String
         out.push_str(&format!("{indent}    .child(\n"));
         match child {
             Node::Element(child_el) => {
-                out.push_str(&generate_element(child_el, depth + 2, stateful));
+                out.push_str(&generate_element(child_el, depth + 2, stateful, imports));
             }
             Node::Text(t) => {
                 out.push_str(&format!("{indent}        \"{t}\""));
@@ -107,7 +139,7 @@ fn gen_stack(el: &Element, indent: &str, depth: usize, stateful: bool) -> String
     out.trim_end().to_string()
 }
 
-fn gen_text(el: &Element, indent: &str, depth: usize, stateful: bool) -> String {
+fn gen_text(el: &Element, indent: &str, depth: usize, stateful: bool, imports: &[ResolvedImport]) -> String {
     let mut out = format!("{indent}div()\n");
 
     for (key, val) in &el.attrs {
@@ -145,7 +177,7 @@ fn gen_text(el: &Element, indent: &str, depth: usize, stateful: bool) -> String 
                     }
                     Node::Element(child_el) => {
                         out.push_str(&format!("{indent}    .child(\n"));
-                        out.push_str(&generate_element(child_el, depth + 1, stateful));
+                        out.push_str(&generate_element(child_el, depth + 1, stateful, imports));
                         out.push_str(&format!("\n{indent}    )\n"));
                     }
                 }
@@ -156,7 +188,7 @@ fn gen_text(el: &Element, indent: &str, depth: usize, stateful: bool) -> String 
     out.trim_end().to_string()
 }
 
-fn gen_button(el: &Element, indent: &str, depth: usize, stateful: bool) -> String {
+fn gen_button(el: &Element, indent: &str, depth: usize, stateful: bool, imports: &[ResolvedImport]) -> String {
     let mut out = format!("{indent}div()\n");
 
     let btn_id = match &el.children[..] {
@@ -198,7 +230,7 @@ fn gen_button(el: &Element, indent: &str, depth: usize, stateful: bool) -> Strin
                     Node::Text(t) => out.push_str(&format!("{indent}    .child(\"{t}\")\n")),
                     Node::Element(child_el) => {
                         out.push_str(&format!("{indent}    .child(\n"));
-                        out.push_str(&generate_element(child_el, depth + 1, stateful));
+                        out.push_str(&generate_element(child_el, depth + 1, stateful, imports));
                         out.push_str(&format!("\n{indent}    )\n"));
                     }
                     Node::Interpolation(expr) => {
@@ -213,7 +245,7 @@ fn gen_button(el: &Element, indent: &str, depth: usize, stateful: bool) -> Strin
     out.trim_end().to_string()
 }
 
-fn gen_fallback(el: &Element, indent: &str, depth: usize, stateful: bool) -> String {
+fn gen_fallback(el: &Element, indent: &str, depth: usize, stateful: bool, imports: &[ResolvedImport]) -> String {
     let mut out = format!("{indent}div()\n");
     for (key, val) in &el.attrs {
         let v = val.as_str();
@@ -223,7 +255,7 @@ fn gen_fallback(el: &Element, indent: &str, depth: usize, stateful: bool) -> Str
         out.push_str(&format!("{indent}    .child(\n"));
         match child {
             Node::Element(child_el) => {
-                out.push_str(&generate_element(child_el, depth + 2, stateful));
+                out.push_str(&generate_element(child_el, depth + 2, stateful, imports));
             }
             Node::Text(t) => out.push_str(&format!("{indent}        \"{t}\"")),
             Node::Interpolation(expr) => {
@@ -243,7 +275,7 @@ fn strip_state_prefix(expr: &str) -> &str {
     expr.trim().strip_prefix("state.").unwrap_or(expr.trim())
 }
 
-fn to_snake_case(name: &str) -> String {
+pub(crate) fn to_snake_case(name: &str) -> String {
     let mut result = String::new();
     for (i, ch) in name.chars().enumerate() {
         if ch.is_uppercase() {
@@ -483,5 +515,59 @@ mod tests {
         for _ in 0..100 {
             generate_from("<Button onclick=\"f\">F</Button>");
         }
+    }
+
+    // --- Component imports ---
+
+    #[test]
+    fn test_imported_element_generates_render_call() {
+        let doc = parse("<Stack><Header /></Stack>").unwrap();
+        let imports: &[(&str, &str)] = &[("Header", "render_header")];
+        let out = generate_with_imports(&doc, 0, imports, None);
+        assert!(out.contains("render_header()"));
+    }
+
+    #[test]
+    fn test_imported_element_in_stateful_component() {
+        let src = "---\n@state AppState\n---\n<Stack><Footer /></Stack>";
+        let doc = parse(src).unwrap();
+        let imports: &[(&str, &str)] = &[("Footer", "render_footer")];
+        let out = generate_with_imports(&doc, 0, imports, None);
+        assert!(out.contains("render_footer()"));
+    }
+
+    #[test]
+    fn test_gpui_import_falls_back_to_div() {
+        let doc = parse("<Stack><TextInput /></Stack>").unwrap();
+        let imports: &[(&str, &str)] = &[("TextInput", "")];
+        let out = generate_with_imports(&doc, 0, imports, None);
+        // GPUI imports have empty render fn — fall through to div
+        assert!(out.contains("div()"));
+    }
+
+    #[test]
+    fn test_builtin_takes_precedence_over_import() {
+        let doc = parse("<Text>hello</Text>").unwrap();
+        let imports: &[(&str, &str)] = &[("Text", "render_text")];
+        let out = generate_with_imports(&doc, 0, imports, None);
+        // Built-in "Text" handling takes precedence, not render_text()
+        assert!(out.contains(".child(\"hello\")"));
+    }
+
+    #[test]
+    fn test_imported_element_with_custom_component_name() {
+        let doc = parse("<Stack><MyHeader /></Stack>").unwrap();
+        let imports: &[(&str, &str)] = &[("MyHeader", "render_header")];
+        let out = generate_with_imports(&doc, 0, imports, None);
+        assert!(out.contains("render_header()"));
+    }
+
+    #[test]
+    fn test_render_fn_name_uses_component_name_arg() {
+        let doc = parse("<Text>hello</Text>").unwrap();
+        let out = generate_with_imports(&doc, 0, &[], Some("CustomWidget"));
+        assert!(out.contains("pub fn render_custom_widget()"));
+        // Should NOT use root element name
+        assert!(!out.contains("pub fn render_text()"));
     }
 }
