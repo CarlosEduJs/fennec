@@ -1,0 +1,12 @@
+---
+use ui::widgets::{Header, Card, Footer};
+use props::{HeaderProps, CardProps};
+---
+<Stack direction="vertical" gap="16">
+    <Header title="props-app" subtitle="Typed Component Props Demo" />
+    <Card heading="What are Props?" body="Props pass typed data from parent to child components. Defined with #[derive(fncc::Props)]." />
+    <Card heading="Multiple Fields" body="Components can receive many typed props. Each field becomes a named attribute on the element." />
+    <Card heading="Click Count" body="Click the card below to see state and props working together." />
+    <Button onclick="click_card">Clicked {state.clicks} times</Button>
+    <Footer />
+</Stack>

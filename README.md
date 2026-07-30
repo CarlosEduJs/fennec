@@ -110,6 +110,53 @@ use ui::components::Footer;
 - `use gpui::TextInput;` keeps the real Rust import in emitted code for use in handlers and state types
 - Regular Rust `use crate::...` statements pass through unchanged
 
+## Typed component props
+
+Components can receive typed props via Rust structs annotated with `#[derive(fncc::Props)]`.
+
+**Define a props struct:**
+```rust
+#[derive(fncc::Props)]
+pub struct HeaderProps {
+    pub title: String,
+    pub subtitle: Option<String>,
+}
+```
+
+**Receive props in a `.fui` component:**
+```fui
+---
+use props::HeaderProps;
+---
+<Stack direction="vertical" gap="8">
+    <Text size="xl">{props.title}</Text>
+    <Text>{props.subtitle}</Text>
+</Stack>
+```
+
+**Pass props when using the component:**
+```fui
+---
+use ui::components::Header;
+---
+<Header title="Welcome" subtitle="Nice to see you" />
+```
+
+### Rules
+- `use props::StructName;` in frontmatter declares the component receives props
+- `{props.field}` interpolates a field (codegen resolves to `props.field` directly — no `format!()` wrapping)
+- Only components that use `{props.xxx}` get a `props: &HeaderProps` parameter in the generated render function
+- `Option<T>` fields are optional in the caller — `<Header title="Hi" />` works even if `subtitle` is `Option<String>`
+- Grouped imports work: `use props::{HeaderProps, FooterProps};`
+
+### Validation (hard errors at build time)
+
+| Scenario | Error |
+|---|---|
+| Unknown attribute: `<Header unknown="x" />` | `component 'Header' has no prop 'unknown'` |
+| Missing required field: `<Header />` (title: String) | `component 'Header' requires prop 'title' (type String)` |
+| Optional field absent: `<Header title="Hi" />` (subtitle: Option<String>) | ✅ passes |
+
 ## Architecture
 
 ```
@@ -165,6 +212,7 @@ The macro generates a **trampoline** (`__fncc_cmd_{name}`) that adapts the user'
 - [x] Explicit state with `cx.notify()` counter example
 - [x] Command trampoline system
 - [x] Multi-file component imports (`use ui::path::Name;` syntax, recursive scan, import resolution)
+- [x] Typed component props (`#[derive(fncc::Props)]`, `use props::HeaderProps`, `{props.field}`, caller validation)
 
 ### Next
 - [ ] `fncc` CLI (`fncc build`, `fncc dev`)
@@ -174,7 +222,7 @@ The macro generates a **trampoline** (`__fncc_cmd_{name}`) that adapts the user'
   - [x] Command extraction from `.rs` files via `syn`
   - [x] Automatic state inference (remove `@state`)
   - [x] Hard-error command resolution (`onclick` → `#[fncc::command]` validation)
-  - [ ] Typed component props
+  - [x] Typed component props
   - [ ] LSP metadata generation
 
 ## Related projects

@@ -17,6 +17,22 @@ pub struct CommandDef {
     pub file: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct ComponentDef {
+    pub name: String,
+    pub render_fn: String,
+    pub source_path: String,
+    pub props_type: Option<String>,
+    pub props_fields: Vec<PropField>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PropField {
+    pub name: String,
+    pub type_expr: String,
+    pub is_optional: bool,
+}
+
 #[derive(Debug)]
 pub enum Diagnostic {
     CommandNotFound {
@@ -82,10 +98,13 @@ impl std::fmt::Display for Diagnostic {
 #[derive(Debug, Default)]
 pub struct SemanticDb {
     pub commands: HashMap<String, CommandDef>,
+    pub components: HashMap<String, ComponentDef>,
+    pub props_types: HashMap<String, Vec<PropField>>,
     pub diagnostics: Vec<Diagnostic>,
 }
 
-/// Analyze Rust source files in `src_dir` looking for `#[fncc::command]` functions.
+/// Analyze Rust source files in `src_dir` looking for `#[fncc::command]` functions
+/// and `#[derive(Props)]` structs.
 pub fn analyze_rs_files(src_dir: &Path) -> Result<SemanticDb, anyhow::Error> {
     let mut db = SemanticDb::default();
     let mut files = Vec::new();
@@ -105,6 +124,11 @@ pub fn analyze_rs_files(src_dir: &Path) -> Result<SemanticDb, anyhow::Error> {
             } else {
                 db.commands.insert(cmd.name.clone(), cmd);
             }
+        }
+
+        let props = extract_props_types(&content, &file_name);
+        for (name, fields) in props {
+            db.props_types.entry(name).or_insert(fields);
         }
     }
 
@@ -185,6 +209,96 @@ fn is_command_attr(attrs: &[Attribute]) -> bool {
             _ => false,
         }
     })
+}
+
+/// Extract props type fields from structs with `#[derive(Props)]`.
+/// Returns a map of struct name → fields.
+fn extract_props_types(content: &str, file_name: &str) -> HashMap<String, Vec<PropField>> {
+    let syntax = match syn::parse_file(content) {
+        Ok(file) => file,
+        Err(_) => return HashMap::new(),
+    };
+
+    let mut result = HashMap::new();
+    collect_props_from_items(&syntax.items, file_name, &mut result);
+    result
+}
+
+#[allow(clippy::only_used_in_recursion)]
+fn collect_props_from_items(items: &[Item], _file_name: &str, result: &mut HashMap<String, Vec<PropField>>) {
+    for item in items {
+        match item {
+            Item::Struct(s) => {
+                if !has_props_derive(&s.attrs) {
+                    continue;
+                }
+                if result.contains_key(&s.ident.to_string()) {
+                    continue;
+                }
+                let fields = match &s.fields {
+                    syn::Fields::Named(n) => n.named.iter().filter_map(extract_prop_field).collect(),
+                    _ => continue,
+                };
+                result.insert(s.ident.to_string(), fields);
+            }
+            Item::Mod(m) => {
+                if let Some((_, nested_items)) = &m.content {
+                    collect_props_from_items(nested_items, _file_name, result);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn has_props_derive(attrs: &[syn::Attribute]) -> bool {
+    attrs
+        .iter()
+        .any(|attr| attr.path().is_ident("derive") && attr.parse_args_with(PropsDerive::parse_multi).is_ok())
+}
+
+struct PropsDerive;
+
+impl PropsDerive {
+    /// Accept `Props` or `fncc::Props` (and skip non-matching idents in `derive(...)`).
+    fn parse_multi(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        while !input.is_empty() {
+            // Try a path like `fncc::Props` or just `Props`
+            if input.peek(syn::Ident) {
+                let path: syn::Path = input.parse()?;
+                if path.segments.last().is_some_and(|s| s.ident == "Props") {
+                    return Ok(PropsDerive);
+                }
+            } else {
+                return Err(input.error("expected identifier or path"));
+            }
+            // Skip optional comma
+            let _ = input.parse::<syn::Token![,]>();
+        }
+        Err(input.error("expected `Props` or `fncc::Props` in derive list"))
+    }
+}
+
+fn extract_prop_field(field: &syn::Field) -> Option<PropField> {
+    let name = field.ident.as_ref()?.to_string();
+    let ty = &field.ty;
+    let type_expr = quote::quote!(#ty).to_string();
+    let is_optional = is_option_type(ty);
+    Some(PropField {
+        name,
+        type_expr,
+        is_optional,
+    })
+}
+
+/// Detect whether a type is `Option<T>` (with any inner type).
+fn is_option_type(ty: &Type) -> bool {
+    if let Type::Path(type_path) = ty
+        && let Some(segment) = type_path.path.segments.last()
+    {
+        return segment.ident == "Option";
+    }
+    false
 }
 
 fn extract_state_type_from_first_arg(inputs: &syn::punctuated::Punctuated<FnArg, syn::Token![,]>) -> Option<String> {
