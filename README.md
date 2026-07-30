@@ -219,10 +219,9 @@ The macro generates a **trampoline** (`__fncc_cmd_{name}`) that adapts the user'
     - [x] `<For>`
     - [x] `<Fragment>`
     - [x] `<Slot>`
+- [x] Freeze the syntax and grammar of .fui files - v0.1^
 
 ### Next
-
-- [ ] Freeze the syntax and grammar.
 
 - [ ] LSP metadata generation
     - [ ] autocomplete
