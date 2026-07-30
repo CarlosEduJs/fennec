@@ -247,6 +247,11 @@ pub fn generate_all_with_options(opts: GenerateOptions) -> Result<()> {
             })
             .flatten();
 
+        // Validate props attributes against field definitions
+        if let Some(ref db) = semantic_db {
+            validate_props_usage(&pf.path, &pf.ast.root, &import_props, &db.props_types)?;
+        }
+
         let component_name = pf.relative_stem.split('/').next_back();
         let resolved_state = state_types.get(&file_id).and_then(|s| s.as_deref());
         let generated = codegen::generate_with_imports(
@@ -263,6 +268,50 @@ pub fn generate_all_with_options(opts: GenerateOptions) -> Result<()> {
     }
 
     std::fs::write(out_file, &output).context("failed to write generated file")?;
+    Ok(())
+}
+
+/// Validate that all attributes on imported components with props match their field definitions:
+/// - Unknown attributes cause a hard error
+/// - Missing required (non-Option) fields cause a hard error
+fn validate_props_usage(
+    file_path: &Path,
+    el: &parser::Element,
+    import_props: &[(&str, Option<&str>)],
+    props_types: &HashMap<String, Vec<semantic::PropField>>,
+) -> Result<()> {
+    if let Some((_, Some(props_type_name))) = import_props.iter().find(|(name, _)| name == &el.name)
+        && let Some(fields) = props_types.get(*props_type_name)
+    {
+        for (attr_name, _) in &el.attrs {
+            if !fields.iter().any(|f| f.name == *attr_name) {
+                let available: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
+                anyhow::bail!(
+                    "in '{}': component `{}` has no prop `{}` — available props: {}",
+                    file_path.display(),
+                    el.name,
+                    attr_name,
+                    available.join(", "),
+                );
+            }
+        }
+        for field in fields {
+            if !field.is_optional && !el.attrs.iter().any(|(name, _)| name == &field.name) {
+                anyhow::bail!(
+                    "in '{}': component `{}` requires prop `{}` (type {})",
+                    file_path.display(),
+                    el.name,
+                    field.name,
+                    field.type_expr,
+                );
+            }
+        }
+    }
+    for child in &el.children {
+        if let parser::Node::Element(child_el) = child {
+            validate_props_usage(file_path, child_el, import_props, props_types)?;
+        }
+    }
     Ok(())
 }
 
@@ -764,6 +813,185 @@ mod tests {
 
         let content = std::fs::read_to_string(&out_file).unwrap();
         assert!(content.contains("title: \"Optional\".into(),"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // --- Props validation tests ---
+
+    #[test]
+    fn test_props_unknown_attribute_errors() {
+        let (dir, ui_dir, src_dir) = test_dir_with_src();
+
+        std::fs::write(
+            ui_dir.join("Widget.fui"),
+            "---\nuse props::WidgetProps;\n---\n<Text>{props.title}</Text>",
+        )
+        .unwrap();
+
+        std::fs::write(
+            ui_dir.join("App.fui"),
+            "---\nuse ui::Widget;\nuse props::WidgetProps;\n---\n<Widget title=\"Hi\" unknown=\"val\" />",
+        )
+        .unwrap();
+
+        std::fs::write(
+            src_dir.join("lib.rs"),
+            "#[derive(fncc::Props)]\npub struct WidgetProps { pub title: String, }\n",
+        )
+        .unwrap();
+
+        let out_file = dir.join("out.rs");
+        let result = generate_all_with_options(GenerateOptions {
+            ui_dir: &ui_dir,
+            out_file: &out_file,
+            src_dir: Some(&src_dir),
+        });
+
+        assert!(result.is_err());
+        let err = format!("{}", result.unwrap_err());
+        assert!(err.contains("unknown"), "error should mention unknown prop: {err}");
+        assert!(err.contains("unknown"), "error should contain attribute name: {err}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_props_missing_required_field_errors() {
+        let (dir, ui_dir, src_dir) = test_dir_with_src();
+
+        std::fs::write(
+            ui_dir.join("Card.fui"),
+            "---\nuse props::CardProps;\n---\n<Text>{props.heading}</Text>",
+        )
+        .unwrap();
+
+        // Missing required field "heading"
+        std::fs::write(
+            ui_dir.join("App.fui"),
+            "---\nuse ui::Card;\nuse props::CardProps;\n---\n<Card />",
+        )
+        .unwrap();
+
+        std::fs::write(
+            src_dir.join("lib.rs"),
+            "#[derive(fncc::Props)]\npub struct CardProps { pub heading: String, }\n",
+        )
+        .unwrap();
+
+        let out_file = dir.join("out.rs");
+        let result = generate_all_with_options(GenerateOptions {
+            ui_dir: &ui_dir,
+            out_file: &out_file,
+            src_dir: Some(&src_dir),
+        });
+
+        assert!(result.is_err());
+        let err = format!("{}", result.unwrap_err());
+        assert!(err.contains("requires"), "error should mention requires: {err}");
+        assert!(err.contains("heading"), "error should mention field name: {err}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_props_optional_field_allows_absence() {
+        let (dir, ui_dir, src_dir) = test_dir_with_src();
+
+        std::fs::write(
+            ui_dir.join("Banner.fui"),
+            "---\nuse props::BannerProps;\n---\n<Text>{props.title}</Text>",
+        )
+        .unwrap();
+
+        // subtitle is Option<String> — allowed to be absent
+        std::fs::write(
+            ui_dir.join("App.fui"),
+            "---\nuse ui::Banner;\nuse props::BannerProps;\n---\n<Banner title=\"Hi\" />",
+        )
+        .unwrap();
+
+        std::fs::write(
+            src_dir.join("lib.rs"),
+            "#[derive(fncc::Props)]\npub struct BannerProps { pub title: String, pub subtitle: Option<String>, }\n",
+        )
+        .unwrap();
+
+        let out_file = dir.join("out.rs");
+        generate_all_with_options(GenerateOptions {
+            ui_dir: &ui_dir,
+            out_file: &out_file,
+            src_dir: Some(&src_dir),
+        })
+        .unwrap();
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_props_all_optional_none_provided_ok() {
+        let (dir, ui_dir, src_dir) = test_dir_with_src();
+
+        std::fs::write(
+            ui_dir.join("Msg.fui"),
+            "---\nuse props::MsgProps;\n---\n<Text>{props.body}</Text>",
+        )
+        .unwrap();
+
+        // All fields optional, none provided — should succeed
+        std::fs::write(
+            ui_dir.join("App.fui"),
+            "---\nuse ui::Msg;\nuse props::MsgProps;\n---\n<Msg />",
+        )
+        .unwrap();
+
+        std::fs::write(
+            src_dir.join("lib.rs"),
+            "#[derive(fncc::Props)]\npub struct MsgProps { pub body: Option<String>, }\n",
+        )
+        .unwrap();
+
+        let out_file = dir.join("out.rs");
+        generate_all_with_options(GenerateOptions {
+            ui_dir: &ui_dir,
+            out_file: &out_file,
+            src_dir: Some(&src_dir),
+        })
+        .unwrap();
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_props_missing_required_with_optionals_present_errors() {
+        let (dir, ui_dir, src_dir) = test_dir_with_src();
+
+        std::fs::write(
+            ui_dir.join("Form.fui"),
+            "---\nuse props::FormProps;\n---\n<Text>{props.name}</Text>",
+        )
+        .unwrap();
+
+        // name is required (String) and missing; email is Option<String> and present
+        std::fs::write(
+            ui_dir.join("App.fui"),
+            "---\nuse ui::Form;\nuse props::FormProps;\n---\n<Form email=\"a@b.com\" />",
+        )
+        .unwrap();
+
+        std::fs::write(
+            src_dir.join("lib.rs"),
+            "#[derive(fncc::Props)]\npub struct FormProps { pub name: String, pub email: Option<String>, }\n",
+        )
+        .unwrap();
+
+        let out_file = dir.join("out.rs");
+        let result = generate_all_with_options(GenerateOptions {
+            ui_dir: &ui_dir,
+            out_file: &out_file,
+            src_dir: Some(&src_dir),
+        });
+
+        assert!(result.is_err());
+        let err = format!("{}", result.unwrap_err());
+        assert!(err.contains("name"), "error should mention missing field name: {err}");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

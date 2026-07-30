@@ -30,6 +30,7 @@ pub struct ComponentDef {
 pub struct PropField {
     pub name: String,
     pub type_expr: String,
+    pub is_optional: bool,
 }
 
 #[derive(Debug)]
@@ -253,19 +254,28 @@ fn collect_props_from_items(items: &[Item], _file_name: &str, result: &mut HashM
 fn has_props_derive(attrs: &[syn::Attribute]) -> bool {
     attrs
         .iter()
-        .any(|attr| attr.path().is_ident("derive") && attr.parse_args::<PropsDerive>().is_ok())
+        .any(|attr| attr.path().is_ident("derive") && attr.parse_args_with(PropsDerive::parse_multi).is_ok())
 }
 
 struct PropsDerive;
 
-impl syn::parse::Parse for PropsDerive {
-    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        let ident: syn::Ident = input.parse()?;
-        if ident == "Props" {
-            Ok(PropsDerive)
-        } else {
-            Err(syn::Error::new(ident.span(), "expected Props"))
+impl PropsDerive {
+    /// Accept `Props` or `fncc::Props` (and skip non-matching idents in `derive(...)`).
+    fn parse_multi(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        while !input.is_empty() {
+            // Try a path like `fncc::Props` or just `Props`
+            if input.peek(syn::Ident) {
+                let path: syn::Path = input.parse()?;
+                if path.segments.last().is_some_and(|s| s.ident == "Props") {
+                    return Ok(PropsDerive);
+                }
+            } else {
+                return Err(input.error("expected identifier or path"));
+            }
+            // Skip optional comma
+            let _ = input.parse::<syn::Token![,]>();
         }
+        Err(input.error("expected `Props` or `fncc::Props` in derive list"))
     }
 }
 
@@ -273,7 +283,22 @@ fn extract_prop_field(field: &syn::Field) -> Option<PropField> {
     let name = field.ident.as_ref()?.to_string();
     let ty = &field.ty;
     let type_expr = quote::quote!(#ty).to_string();
-    Some(PropField { name, type_expr })
+    let is_optional = is_option_type(ty);
+    Some(PropField {
+        name,
+        type_expr,
+        is_optional,
+    })
+}
+
+/// Detect whether a type is `Option<T>` (with any inner type).
+fn is_option_type(ty: &Type) -> bool {
+    if let Type::Path(type_path) = ty
+        && let Some(segment) = type_path.path.segments.last()
+    {
+        return segment.ident == "Option";
+    }
+    false
 }
 
 fn extract_state_type_from_first_arg(inputs: &syn::punctuated::Punctuated<FnArg, syn::Token![,]>) -> Option<String> {
