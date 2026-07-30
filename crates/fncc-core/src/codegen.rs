@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 use std::collections::HashMap;
 
 use crate::parser::{self, AttrValue, Document, Element, Node};
@@ -8,7 +10,7 @@ pub fn generate(doc: &Document) -> String {
 }
 
 pub fn generate_with_id(doc: &Document, file_id: usize) -> String {
-    generate_with_imports(doc, file_id, &[], None, None, None, &[], None)
+    generate_with_imports(doc, file_id, &[], None, None, None, &[], None, &[], false)
 }
 
 /// Resolved import entry: (tag_name, render_fn_name)
@@ -29,6 +31,8 @@ pub fn generate_with_imports(
     props_type: Option<&str>,
     import_props: &[(&str, Option<&str>)],
     prop_fields: Option<&HashMap<String, Vec<PropField>>>,
+    import_has_slots: &[(&str, bool)],
+    has_slot: bool,
 ) -> String {
     let mut out = String::new();
     let state_type = resolved_state_type.or(doc.state_type.as_deref());
@@ -52,7 +56,15 @@ pub fn generate_with_imports(
     }
 
     if has_state {
-        generate_stateful(doc, &mut out, imports, state_type, import_props, prop_fields);
+        generate_stateful(
+            doc,
+            &mut out,
+            imports,
+            state_type,
+            import_props,
+            prop_fields,
+            import_has_slots,
+        );
     } else {
         generate_stateless(
             doc,
@@ -62,6 +74,8 @@ pub fn generate_with_imports(
             props_type,
             import_props,
             prop_fields,
+            import_has_slots,
+            has_slot,
         );
     }
 
@@ -76,14 +90,26 @@ fn generate_stateless(
     props_type: Option<&str>,
     import_props: &[(&str, Option<&str>)],
     prop_fields: Option<&HashMap<String, Vec<PropField>>>,
+    import_has_slots: &[(&str, bool)],
+    has_slot: bool,
 ) {
     let name = component_name.unwrap_or(&doc.root.name);
     let fn_name = format!("render_{}", to_snake_case(name));
-    if let Some(pt) = props_type {
-        out.push_str(&format!("pub fn {fn_name}(props: &{pt}) -> impl IntoElement {{\n"));
+
+    // Build function signature based on props and slot
+    let params = match (props_type, has_slot) {
+        (Some(pt), true) => format!("props: &{pt}, children: impl IntoElement"),
+        (Some(pt), false) => format!("props: &{pt}"),
+        (None, true) => "children: impl IntoElement".to_string(),
+        (None, false) => String::new(),
+    };
+
+    let sig = if params.is_empty() {
+        format!("pub fn {fn_name}() -> impl IntoElement {{\n")
     } else {
-        out.push_str(&format!("pub fn {fn_name}() -> impl IntoElement {{\n"));
-    }
+        format!("pub fn {fn_name}({params}) -> impl IntoElement {{\n")
+    };
+    out.push_str(&sig);
     out.push_str(&generate_element(
         &doc.root,
         1,
@@ -91,6 +117,7 @@ fn generate_stateless(
         imports,
         import_props,
         prop_fields,
+        import_has_slots,
     ));
     out.push('\n');
     out.push_str("}\n");
@@ -103,6 +130,7 @@ fn generate_stateful(
     state_type: Option<&str>,
     import_props: &[(&str, Option<&str>)],
     prop_fields: Option<&HashMap<String, Vec<PropField>>>,
+    _import_has_slots: &[(&str, bool)],
 ) {
     let state_type = state_type.unwrap_or("Self");
 
@@ -116,9 +144,179 @@ fn generate_stateful(
         imports,
         import_props,
         prop_fields,
+        _import_has_slots,
     ));
     out.push_str("\n    }\n");
     out.push_str("}\n");
+}
+
+/// Group consecutive If/ElseIf/Else elements into branches.
+fn collect_if_chain(nodes: &[Node], start: usize) -> Vec<&Element> {
+    let mut branches = Vec::new();
+    for node in &nodes[start..] {
+        match node {
+            Node::Element(el) if el.name == "If" || el.name == "ElseIf" || el.name == "Else" => {
+                branches.push(el);
+            }
+            _ => break,
+        }
+    }
+    branches
+}
+
+/// Generate an if/else-if/else expression for a chain of If/ElseIf/Else elements.
+/// Returns a single-line Rust expression like `if cond { div()... } else { div()... }`.
+fn gen_if_expr(
+    branches: &[&Element],
+    stateful: bool,
+    imports: &[ResolvedImport],
+    import_props: &[(&str, Option<&str>)],
+    prop_fields: Option<&HashMap<String, Vec<PropField>>>,
+    _import_has_slots: &[(&str, bool)],
+) -> String {
+    let mut expr = String::new();
+    for (i, el) in branches.iter().enumerate() {
+        if i == 0 {
+            expr.push_str("if ");
+        } else if el.name == "Else" {
+            expr.push_str(" else ");
+        } else {
+            expr.push_str(" else if ");
+        }
+        if let Some(cond) = parser::get_condition_attr(el) {
+            let e = interpolation_expr(cond);
+            expr.push_str(&e);
+            expr.push(' ');
+        }
+        expr.push_str("{ ");
+        match &el.children[..] {
+            [] => expr.push_str("div()"),
+            [single] => match single {
+                Node::Text(t) => expr.push_str(&format!("div().child(\"{t}\")")),
+                Node::Interpolation(interp) => {
+                    let e = interpolation_expr(interp);
+                    expr.push_str(&format!("div().child({e}.to_string())"));
+                }
+                Node::Element(child_el) => {
+                    let child_code = generate_element(
+                        child_el,
+                        0,
+                        stateful,
+                        imports,
+                        import_props,
+                        prop_fields,
+                        _import_has_slots,
+                    );
+                    expr.push_str(&format!("div().child({})", clean_inline(&child_code)));
+                }
+            },
+            children => {
+                expr.push_str("div()");
+                for child in children {
+                    match child {
+                        Node::Text(t) => expr.push_str(&format!(".child(\"{t}\")")),
+                        Node::Interpolation(interp) => {
+                            let e = interpolation_expr(interp);
+                            expr.push_str(&format!(".child({e}.to_string())"));
+                        }
+                        Node::Element(child_el) => {
+                            let child_code = generate_element(
+                                child_el,
+                                0,
+                                stateful,
+                                imports,
+                                import_props,
+                                prop_fields,
+                                _import_has_slots,
+                            );
+                            expr.push_str(&format!(".child({})", clean_inline(&child_code)));
+                        }
+                    }
+                }
+            }
+        }
+        expr.push_str(" }");
+    }
+    // Add else { div() } if the last branch isn't an Else
+    if branches.last().map(|b| b.name.as_str()) != Some("Else") {
+        expr.push_str(" else { div() }");
+    }
+    expr
+}
+
+/// Generate a For loop expression for use inside `.children(...)`.
+fn gen_for_expr(
+    el: &Element,
+    stateful: bool,
+    imports: &[ResolvedImport],
+    import_props: &[(&str, Option<&str>)],
+    prop_fields: Option<&HashMap<String, Vec<PropField>>>,
+    _import_has_slots: &[(&str, bool)],
+) -> String {
+    let each = parser::get_each_attr(el).unwrap_or("");
+    let let_var = parser::get_let_attr(el).unwrap_or("item");
+    let index_var = parser::get_index_attr(el);
+    let iter_expr = interpolation_expr(each);
+
+    let mut body = String::new();
+    match &el.children[..] {
+        [] => body.push_str("div()"),
+        [single] => match single {
+            Node::Text(t) => body.push_str(&format!("div().child(\"{t}\")")),
+            Node::Interpolation(interp) => {
+                let e = interpolation_expr(interp);
+                body.push_str(&format!("div().child({e}.to_string())"));
+            }
+            Node::Element(child_el) => {
+                let child_code = generate_element(
+                    child_el,
+                    1,
+                    stateful,
+                    imports,
+                    import_props,
+                    prop_fields,
+                    _import_has_slots,
+                );
+                body.push_str(&child_code);
+            }
+        },
+        children => {
+            body.push_str("div()");
+            for child in children {
+                match child {
+                    Node::Text(t) => body.push_str(&format!(".child(\"{t}\")")),
+                    Node::Interpolation(interp) => {
+                        let e = interpolation_expr(interp);
+                        body.push_str(&format!(".child({e}.to_string())"));
+                    }
+                    Node::Element(child_el) => {
+                        let child_code = generate_element(
+                            child_el,
+                            1,
+                            stateful,
+                            imports,
+                            import_props,
+                            prop_fields,
+                            _import_has_slots,
+                        );
+                        body.push_str(&format!(".child({})", clean_inline(&child_code)));
+                    }
+                }
+            }
+        }
+    }
+
+    // Strip self. prefix for loop variables so they reference the closure args, not state fields
+    let var_names: Vec<&str> = index_var.iter().chain(std::iter::once(&let_var)).copied().collect();
+    for var in &var_names {
+        body = body.replace(&format!("self.{var}"), var);
+    }
+
+    if let Some(index) = index_var {
+        format!("{iter_expr}.iter().enumerate().map(|({index}, {let_var})| {{\n    {body}\n}})")
+    } else {
+        format!("{iter_expr}.iter().map(|{let_var}| {{\n    {body}\n}})")
+    }
 }
 
 fn generate_element(
@@ -128,14 +326,79 @@ fn generate_element(
     imports: &[ResolvedImport],
     import_props: &[(&str, Option<&str>)],
     prop_fields: Option<&HashMap<String, Vec<PropField>>>,
+    _import_has_slots: &[(&str, bool)],
 ) -> String {
     let indent = "    ".repeat(depth);
 
     // Built-in elements
     match el.name.as_str() {
-        "Stack" => return gen_stack(el, &indent, depth, stateful, imports, import_props, prop_fields),
-        "Text" => return gen_text(el, &indent, depth, stateful, imports, import_props, prop_fields),
-        "Button" => return gen_button(el, &indent, depth, stateful, imports, import_props, prop_fields),
+        "Stack" => {
+            return gen_stack(
+                el,
+                &indent,
+                depth,
+                stateful,
+                imports,
+                import_props,
+                prop_fields,
+                _import_has_slots,
+            );
+        }
+        "Text" => {
+            return gen_text(
+                el,
+                &indent,
+                depth,
+                stateful,
+                imports,
+                import_props,
+                prop_fields,
+                _import_has_slots,
+            );
+        }
+        "Button" => {
+            return gen_button(
+                el,
+                &indent,
+                depth,
+                stateful,
+                imports,
+                import_props,
+                prop_fields,
+                _import_has_slots,
+            );
+        }
+        "Fragment" => {
+            return gen_fragment(
+                el,
+                &indent,
+                depth,
+                stateful,
+                imports,
+                import_props,
+                prop_fields,
+                _import_has_slots,
+            );
+        }
+        "For" => {
+            return format!(
+                "div().children({})",
+                gen_for_expr(el, stateful, imports, import_props, prop_fields, _import_has_slots)
+            );
+        }
+        "If" | "ElseIf" | "Else" => {
+            // Standalone — generate if-expression with no else
+            let branches = [el];
+            return gen_if_expr(
+                &branches,
+                stateful,
+                imports,
+                import_props,
+                prop_fields,
+                _import_has_slots,
+            );
+        }
+        "Slot" => return "children".to_string(),
         _ => {}
     }
 
@@ -180,7 +443,130 @@ fn generate_element(
     }
 
     // Fallback for gpui imports and unknown elements
-    gen_fallback(el, &indent, depth, stateful, imports, import_props, prop_fields)
+    gen_fallback(
+        el,
+        &indent,
+        depth,
+        stateful,
+        imports,
+        import_props,
+        prop_fields,
+        _import_has_slots,
+    )
+}
+
+/// Generate code for a `<Fragment>` — wraps children in `div()`.
+fn gen_fragment(
+    el: &Element,
+    indent: &str,
+    depth: usize,
+    stateful: bool,
+    imports: &[ResolvedImport],
+    import_props: &[(&str, Option<&str>)],
+    prop_fields: Option<&HashMap<String, Vec<PropField>>>,
+    _import_has_slots: &[(&str, bool)],
+) -> String {
+    let mut out = format!("{indent}div()\n");
+    for child in &el.children {
+        match child {
+            Node::Element(child_el) => {
+                out.push_str(&format!("{indent}    .child(\n"));
+                out.push_str(&generate_element(
+                    child_el,
+                    depth + 2,
+                    stateful,
+                    imports,
+                    import_props,
+                    prop_fields,
+                    _import_has_slots,
+                ));
+                out.push_str(&format!("\n{indent}    )\n"));
+            }
+            Node::Text(t) => {
+                out.push_str(&format!("{indent}    .child(\"{t}\")\n"));
+            }
+            Node::Interpolation(expr) => {
+                let e = interpolation_expr(expr);
+                out.push_str(&format!("{indent}    .child({e}.to_string())\n"));
+            }
+        }
+    }
+    out.trim_end().to_string()
+}
+
+/// Generate child code with control-flow awareness (If/ElseIf/Else chains, For, Fragment inlining).
+fn generate_children_code(
+    children: &[Node],
+    indent: &str,
+    depth: usize,
+    stateful: bool,
+    imports: &[ResolvedImport],
+    import_props: &[(&str, Option<&str>)],
+    prop_fields: Option<&HashMap<String, Vec<PropField>>>,
+    _import_has_slots: &[(&str, bool)],
+) -> String {
+    let mut out = String::new();
+    let mut i = 0;
+    while i < children.len() {
+        match &children[i] {
+            Node::Element(el) if el.name == "If" => {
+                let chain = collect_if_chain(children, i);
+                let expr = gen_if_expr(&chain, stateful, imports, import_props, prop_fields, _import_has_slots);
+                out.push_str(&format!("{indent}    .child(\n"));
+                out.push_str(&format!("{indent}        {expr}\n"));
+                out.push_str(&format!("{indent}    )\n"));
+                i += chain.len();
+            }
+            Node::Element(el) if el.name == "For" => {
+                let for_code = gen_for_expr(el, stateful, imports, import_props, prop_fields, _import_has_slots);
+                out.push_str(&format!("{indent}    .children(\n"));
+                out.push_str(&format!("{indent}        {for_code}\n"));
+                out.push_str(&format!("{indent}    )\n"));
+                i += 1;
+            }
+            Node::Element(el) if el.name == "Fragment" => {
+                let frag_code = generate_children_code(
+                    &el.children,
+                    indent,
+                    depth,
+                    stateful,
+                    imports,
+                    import_props,
+                    prop_fields,
+                    _import_has_slots,
+                );
+                out.push_str(&frag_code);
+                i += 1;
+            }
+            _ => {
+                out.push_str(&format!("{indent}    .child(\n"));
+                match &children[i] {
+                    Node::Element(child_el) => {
+                        out.push_str(&generate_element(
+                            child_el,
+                            depth + 2,
+                            stateful,
+                            imports,
+                            import_props,
+                            prop_fields,
+                            _import_has_slots,
+                        ));
+                    }
+                    Node::Text(t) => {
+                        out.push_str(&format!("{indent}        \"{t}\""));
+                    }
+                    Node::Interpolation(expr) => {
+                        let e = interpolation_expr(expr);
+                        out.push_str(&format!("{indent}        {e}.to_string()"));
+                    }
+                }
+                out.push('\n');
+                out.push_str(&format!("{indent}    )\n"));
+                i += 1;
+            }
+        }
+    }
+    out
 }
 
 fn gen_stack(
@@ -191,6 +577,7 @@ fn gen_stack(
     imports: &[ResolvedImport],
     import_props: &[(&str, Option<&str>)],
     prop_fields: Option<&HashMap<String, Vec<PropField>>>,
+    _import_has_slots: &[(&str, bool)],
 ) -> String {
     let mut out = format!("{indent}div()\n");
 
@@ -214,30 +601,16 @@ fn gen_stack(
         out.push_str(&format!("{indent}    .flex()\n"));
     }
 
-    for child in &el.children {
-        out.push_str(&format!("{indent}    .child(\n"));
-        match child {
-            Node::Element(child_el) => {
-                out.push_str(&generate_element(
-                    child_el,
-                    depth + 2,
-                    stateful,
-                    imports,
-                    import_props,
-                    prop_fields,
-                ));
-            }
-            Node::Text(t) => {
-                out.push_str(&format!("{indent}        \"{t}\""));
-            }
-            Node::Interpolation(expr) => {
-                let e = interpolation_expr(expr);
-                out.push_str(&format!("{indent}        {e}.to_string()"));
-            }
-        }
-        out.push('\n');
-        out.push_str(&format!("{indent}    )\n"));
-    }
+    out.push_str(&generate_children_code(
+        &el.children,
+        indent,
+        depth,
+        stateful,
+        imports,
+        import_props,
+        prop_fields,
+        _import_has_slots,
+    ));
 
     out.trim_end().to_string()
 }
@@ -250,6 +623,7 @@ fn gen_text(
     imports: &[ResolvedImport],
     import_props: &[(&str, Option<&str>)],
     prop_fields: Option<&HashMap<String, Vec<PropField>>>,
+    _import_has_slots: &[(&str, bool)],
 ) -> String {
     let mut out = format!("{indent}div()\n");
 
@@ -279,27 +653,16 @@ fn gen_text(
             out.push_str(&format!("{indent}    .child({e}.to_string())"));
         }
         children => {
-            for child in children {
-                match child {
-                    Node::Text(t) => out.push_str(&format!("{indent}    .child(\"{t}\")\n")),
-                    Node::Interpolation(expr) => {
-                        let e = interpolation_expr(expr);
-                        out.push_str(&format!("{indent}    .child({e}.to_string())\n"));
-                    }
-                    Node::Element(child_el) => {
-                        out.push_str(&format!("{indent}    .child(\n"));
-                        out.push_str(&generate_element(
-                            child_el,
-                            depth + 1,
-                            stateful,
-                            imports,
-                            import_props,
-                            prop_fields,
-                        ));
-                        out.push_str(&format!("\n{indent}    )\n"));
-                    }
-                }
-            }
+            out.push_str(&generate_children_code(
+                children,
+                indent,
+                depth,
+                stateful,
+                imports,
+                import_props,
+                prop_fields,
+                _import_has_slots,
+            ));
         }
     }
 
@@ -314,6 +677,7 @@ fn gen_button(
     imports: &[ResolvedImport],
     import_props: &[(&str, Option<&str>)],
     prop_fields: Option<&HashMap<String, Vec<PropField>>>,
+    _import_has_slots: &[(&str, bool)],
 ) -> String {
     let mut out = format!("{indent}div()\n");
 
@@ -351,27 +715,16 @@ fn gen_button(
             out.push_str(&format!("{indent}    .child({e}.to_string())"));
         }
         children => {
-            for child in children {
-                match child {
-                    Node::Text(t) => out.push_str(&format!("{indent}    .child(\"{t}\")\n")),
-                    Node::Element(child_el) => {
-                        out.push_str(&format!("{indent}    .child(\n"));
-                        out.push_str(&generate_element(
-                            child_el,
-                            depth + 1,
-                            stateful,
-                            imports,
-                            import_props,
-                            prop_fields,
-                        ));
-                        out.push_str(&format!("\n{indent}    )\n"));
-                    }
-                    Node::Interpolation(expr) => {
-                        let e = interpolation_expr(expr);
-                        out.push_str(&format!("{indent}    .child({e}.to_string())\n"));
-                    }
-                }
-            }
+            out.push_str(&generate_children_code(
+                children,
+                indent,
+                depth,
+                stateful,
+                imports,
+                import_props,
+                prop_fields,
+                _import_has_slots,
+            ));
         }
     }
 
@@ -386,34 +739,23 @@ fn gen_fallback(
     imports: &[ResolvedImport],
     import_props: &[(&str, Option<&str>)],
     prop_fields: Option<&HashMap<String, Vec<PropField>>>,
+    _import_has_slots: &[(&str, bool)],
 ) -> String {
     let mut out = format!("{indent}div()\n");
     for (key, val) in &el.attrs {
         let v = val.as_str();
         out.push_str(&format!("{indent}    .attr(\"{key}\", \"{v}\")\n"));
     }
-    for child in &el.children {
-        out.push_str(&format!("{indent}    .child(\n"));
-        match child {
-            Node::Element(child_el) => {
-                out.push_str(&generate_element(
-                    child_el,
-                    depth + 2,
-                    stateful,
-                    imports,
-                    import_props,
-                    prop_fields,
-                ));
-            }
-            Node::Text(t) => out.push_str(&format!("{indent}        \"{t}\"")),
-            Node::Interpolation(expr) => {
-                let e = interpolation_expr(expr);
-                out.push_str(&format!("{indent}        {e}.to_string()"));
-            }
-        }
-        out.push('\n');
-        out.push_str(&format!("{indent}    )\n"));
-    }
+    out.push_str(&generate_children_code(
+        &el.children,
+        indent,
+        depth,
+        stateful,
+        imports,
+        import_props,
+        prop_fields,
+        _import_has_slots,
+    ));
     out.trim_end().to_string()
 }
 
@@ -421,6 +763,12 @@ fn gen_fallback(
 /// - `state.field` → `self.field` (for stateful components)
 /// - `props.field` → `props.field` (for stateless components with props)
 /// - `bare_expr` → `self.bare_expr` (fallback for stateful components)
+// Collapse whitespace and remove space between `)` and `.` for inline expressions.
+fn clean_inline(s: &str) -> String {
+    let collapsed: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    collapsed.replace(") .", ").")
+}
+
 fn interpolation_expr(expr: &str) -> String {
     let trimmed = expr.trim();
     if let Some(field) = trimmed.strip_prefix("state.") {
@@ -447,15 +795,6 @@ pub(crate) fn to_snake_case(name: &str) -> String {
         }
     }
     result
-}
-
-impl AttrValue {
-    fn as_str(&self) -> &str {
-        match self {
-            AttrValue::String(s) => s,
-            AttrValue::Interpolation(s) => s,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -661,7 +1000,7 @@ mod tests {
     fn test_imported_element_generates_render_call() {
         let doc = parse("<Stack><Header /></Stack>").unwrap();
         let imports: &[(&str, &str)] = &[("Header", "render_header")];
-        let out = generate_with_imports(&doc, 0, imports, None, None, None, &[], None);
+        let out = generate_with_imports(&doc, 0, imports, None, None, None, &[], None, &[], false);
         assert!(out.contains("render_header()"));
     }
 
@@ -670,7 +1009,7 @@ mod tests {
         let src = "---\n@state AppState\n---\n<Stack><Footer /></Stack>";
         let doc = parse(src).unwrap();
         let imports: &[(&str, &str)] = &[("Footer", "render_footer")];
-        let out = generate_with_imports(&doc, 0, imports, None, None, None, &[], None);
+        let out = generate_with_imports(&doc, 0, imports, None, None, None, &[], None, &[], false);
         assert!(out.contains("render_footer()"));
     }
 
@@ -678,7 +1017,7 @@ mod tests {
     fn test_gpui_import_falls_back_to_div() {
         let doc = parse("<Stack><TextInput /></Stack>").unwrap();
         let imports: &[(&str, &str)] = &[("TextInput", "")];
-        let out = generate_with_imports(&doc, 0, imports, None, None, None, &[], None);
+        let out = generate_with_imports(&doc, 0, imports, None, None, None, &[], None, &[], false);
         // GPUI imports have empty render fn — fall through to div
         assert!(out.contains("div()"));
     }
@@ -687,7 +1026,7 @@ mod tests {
     fn test_builtin_takes_precedence_over_import() {
         let doc = parse("<Text>hello</Text>").unwrap();
         let imports: &[(&str, &str)] = &[("Text", "render_text")];
-        let out = generate_with_imports(&doc, 0, imports, None, None, None, &[], None);
+        let out = generate_with_imports(&doc, 0, imports, None, None, None, &[], None, &[], false);
         // Built-in "Text" handling takes precedence, not render_text()
         assert!(out.contains(".child(\"hello\")"));
     }
@@ -696,14 +1035,14 @@ mod tests {
     fn test_imported_element_with_custom_component_name() {
         let doc = parse("<Stack><MyHeader /></Stack>").unwrap();
         let imports: &[(&str, &str)] = &[("MyHeader", "render_header")];
-        let out = generate_with_imports(&doc, 0, imports, None, None, None, &[], None);
+        let out = generate_with_imports(&doc, 0, imports, None, None, None, &[], None, &[], false);
         assert!(out.contains("render_header()"));
     }
 
     #[test]
     fn test_render_fn_name_uses_component_name_arg() {
         let doc = parse("<Text>hello</Text>").unwrap();
-        let out = generate_with_imports(&doc, 0, &[], Some("CustomWidget"), None, None, &[], None);
+        let out = generate_with_imports(&doc, 0, &[], Some("CustomWidget"), None, None, &[], None, &[], false);
         assert!(out.contains("pub fn render_custom_widget()"));
         // Should NOT use root element name
         assert!(!out.contains("pub fn render_text()"));
@@ -714,7 +1053,18 @@ mod tests {
     #[test]
     fn test_props_stateless_component_with_props_signature() {
         let doc = parse("<Text>{props.title}</Text>").unwrap();
-        let out = generate_with_imports(&doc, 0, &[], Some("Header"), None, Some("HeaderProps"), &[], None);
+        let out = generate_with_imports(
+            &doc,
+            0,
+            &[],
+            Some("Header"),
+            None,
+            Some("HeaderProps"),
+            &[],
+            None,
+            &[],
+            false,
+        );
         assert!(out.contains("pub fn render_header(props: &HeaderProps) -> impl IntoElement {"));
         assert!(out.contains("props.title"));
     }
@@ -724,7 +1074,7 @@ mod tests {
         let doc = parse("<Header title=\"Welcome\" />").unwrap();
         let imports: &[(&str, &str)] = &[("Header", "render_header")];
         let import_props: &[(&str, Option<&str>)] = &[("Header", Some("HeaderProps"))];
-        let out = generate_with_imports(&doc, 0, imports, None, None, None, import_props, None);
+        let out = generate_with_imports(&doc, 0, imports, None, None, None, import_props, None, &[], false);
         assert!(out.contains("render_header(&HeaderProps {"));
         assert!(out.contains("title: \"Welcome\".into(),"));
         assert!(out.contains("})"));
@@ -735,7 +1085,7 @@ mod tests {
         let doc = parse("<Header title=\"Hi\" subtitle=\"World\" />").unwrap();
         let imports: &[(&str, &str)] = &[("Header", "render_header")];
         let import_props: &[(&str, Option<&str>)] = &[("Header", Some("HeaderProps"))];
-        let out = generate_with_imports(&doc, 0, imports, None, None, None, import_props, None);
+        let out = generate_with_imports(&doc, 0, imports, None, None, None, import_props, None, &[], false);
         assert!(out.contains("title: \"Hi\".into(),"));
         assert!(out.contains("subtitle: \"World\".into(),"));
     }
@@ -745,7 +1095,7 @@ mod tests {
         let doc = parse("<Header title=\"Hi\" />").unwrap();
         let imports: &[(&str, &str)] = &[("Header", "render_header")];
         let import_props: &[(&str, Option<&str>)] = &[("Header", Some("HeaderProps"))];
-        let out = generate_with_imports(&doc, 0, imports, None, None, None, import_props, None);
+        let out = generate_with_imports(&doc, 0, imports, None, None, None, import_props, None, &[], false);
         // Option<T> fields are transparent at codegen — .into() handles conversion
         assert!(out.contains("title: \"Hi\".into(),"));
     }
@@ -755,7 +1105,7 @@ mod tests {
         let doc = parse("<Stack><Header title=\"Nested\" /><Text>ok</Text></Stack>").unwrap();
         let imports: &[(&str, &str)] = &[("Header", "render_header")];
         let import_props: &[(&str, Option<&str>)] = &[("Header", Some("HeaderProps"))];
-        let out = generate_with_imports(&doc, 0, imports, None, None, None, import_props, None);
+        let out = generate_with_imports(&doc, 0, imports, None, None, None, import_props, None, &[], false);
         assert!(out.contains("render_header(&HeaderProps {"));
         assert!(out.contains("title: \"Nested\".into(),"));
     }
@@ -765,7 +1115,7 @@ mod tests {
         let doc = parse("<Stack><Header title=\"A\" /><Footer /></Stack>").unwrap();
         let imports: &[(&str, &str)] = &[("Header", "render_header"), ("Footer", "render_footer")];
         let import_props: &[(&str, Option<&str>)] = &[("Header", Some("HeaderProps")), ("Footer", None)];
-        let out = generate_with_imports(&doc, 0, imports, None, None, None, import_props, None);
+        let out = generate_with_imports(&doc, 0, imports, None, None, None, import_props, None, &[], false);
         assert!(out.contains("render_header(&HeaderProps {"));
         assert!(out.contains("title: \"A\".into(),"));
         assert!(out.contains("render_footer()"));
@@ -776,7 +1126,7 @@ mod tests {
         let doc = parse("<Footer />").unwrap();
         let imports: &[(&str, &str)] = &[("Footer", "render_footer")];
         let import_props: &[(&str, Option<&str>)] = &[("Footer", None)];
-        let out = generate_with_imports(&doc, 0, imports, None, None, None, import_props, None);
+        let out = generate_with_imports(&doc, 0, imports, None, None, None, import_props, None, &[], false);
         assert!(out.contains("render_footer()"));
         assert!(!out.contains("&"));
     }
@@ -786,8 +1136,90 @@ mod tests {
         let doc = parse("<Header title=\"SelfClose\" subtitle=\"X\" />").unwrap();
         let imports: &[(&str, &str)] = &[("Header", "render_header")];
         let import_props: &[(&str, Option<&str>)] = &[("Header", Some("HeaderProps"))];
-        let out = generate_with_imports(&doc, 0, imports, None, None, None, import_props, None);
+        let out = generate_with_imports(&doc, 0, imports, None, None, None, import_props, None, &[], false);
         assert!(out.contains("title: \"SelfClose\".into(),"));
         assert!(out.contains("subtitle: \"X\".into(),"));
+    }
+
+    // --- Control Flow & Composition tests ---
+
+    #[test]
+    fn test_if_generates_if_expression() {
+        let out = generate_from("<If condition=\"{state.show}\"><Text>Hi</Text></If>");
+        assert!(out.contains("if self.show {"));
+        assert!(out.contains("div().child(div().child(\"Hi\"))"));
+        assert!(out.contains("} else {"), "else branch should be present");
+        assert!(out.contains("div() }"));
+    }
+
+    #[test]
+    fn test_if_else_chain() {
+        let src = "<Stack><If condition=\"{state.a}\"><Text>A</Text></If><Else><Text>B</Text></Else></Stack>";
+        let out = generate_from(src);
+        assert!(out.contains("if self.a {"));
+        assert!(out.contains("} else {"));
+        assert!(out.contains("div().child(\"B\")"));
+    }
+
+    #[test]
+    fn test_if_elseif_else_chain() {
+        let src = "<Stack><If condition=\"{state.x}\"><Text>X</Text></If><ElseIf condition=\"{state.y}\"><Text>Y</Text></ElseIf><Else><Text>Z</Text></Else></Stack>";
+        let out = generate_from(src);
+        assert!(out.contains("if self.x {"));
+        assert!(out.contains("else if self.y {"));
+        assert!(out.contains("else {"));
+    }
+
+    #[test]
+    fn test_for_generates_iteration() {
+        let out = generate_from("<For each=\"{state.items}\" let=\"item\"><Text>{item.name}</Text></For>");
+        assert!(out.contains("self.items.iter().map(|item| {"));
+        assert!(out.contains("item.name"));
+    }
+
+    #[test]
+    fn test_for_with_index() {
+        let out = generate_from("<For each=\"{state.items}\" let=\"item\" index=\"i\"><Text>{item.name}</Text></For>");
+        assert!(out.contains(".enumerate()"));
+        assert!(out.contains("|(i, item)|"));
+    }
+
+    #[test]
+    fn test_fragment_generates_div() {
+        let out = generate_from("<Fragment><Text>A</Text><Text>B</Text></Fragment>");
+        assert!(out.contains("div()"));
+    }
+
+    #[test]
+    fn test_slot_in_stateless_component() {
+        let doc = parse("<Stack><Slot /></Stack>").unwrap();
+        let out = generate_with_imports(&doc, 0, &[], Some("Card"), None, None, &[], None, &[], true);
+        assert!(out.contains("children: impl IntoElement"));
+        assert!(out.contains("children"));
+    }
+
+    #[test]
+    fn test_if_in_stack() {
+        let src = "<Stack><If condition=\"{state.flag}\"><Text>Yes</Text></If><Text>Always</Text></Stack>";
+        let out = generate_from(src);
+        assert!(out.contains("if self.flag {"));
+        assert!(out.contains("\"Always\""));
+    }
+
+    #[test]
+    fn test_for_in_stack() {
+        let src = "<Stack><For each=\"{state.items}\" let=\"item\"><Text>{item}</Text></For></Stack>";
+        let out = generate_from(src);
+        assert!(out.contains("self.items.iter().map(|item| {"));
+        assert!(out.contains(".children("));
+    }
+
+    #[test]
+    fn test_fragment_nested_in_stack() {
+        let src = "<Stack><Fragment><Text>A</Text><Text>B</Text></Fragment></Stack>";
+        let out = generate_from(src);
+        assert!(out.contains("div()"));
+        assert!(out.contains(".child(\"A\")"));
+        assert!(out.contains(".child(\"B\")"));
     }
 }

@@ -123,6 +123,15 @@ pub fn generate_all_with_options(opts: GenerateOptions) -> Result<()> {
         render_fn_to_props.insert(render_fn, props_type);
     }
 
+    // Build slot index: render_fn_name -> has_slot
+    let mut render_fn_to_slot: HashMap<String, bool> = HashMap::new();
+    for pf in &parsed_files {
+        let component_name = pf.relative_stem.split('/').next_back().unwrap_or("");
+        let render_fn = format!("render_{}", codegen::to_snake_case(component_name));
+        let has_slot = parser::has_slot(&pf.ast.root);
+        render_fn_to_slot.insert(render_fn, has_slot);
+    }
+
     // Validate imports: every FuiPath import must exist in the index
     for pf in &parsed_files {
         for imp in &pf.ast.imports {
@@ -267,6 +276,32 @@ pub fn generate_all_with_options(opts: GenerateOptions) -> Result<()> {
             );
         }
 
+        // Stateful components cannot have slots
+        if resolved_state.is_some() && parser::has_slot(&pf.ast.root) {
+            anyhow::bail!(
+                "in '{}': stateful components cannot use `<Slot>` — slots are only supported on stateless components",
+                pf.path.display(),
+            );
+        }
+
+        // Resolve import_has_slots: for each FuiPath import, does the target have a slot?
+        let import_has_slots: Vec<(&str, bool)> = pf
+            .ast
+            .imports
+            .iter()
+            .filter_map(|imp| {
+                let render_fn = match &imp.source {
+                    parser::ImportSource::FuiPath(ui_path) => import_index.get(ui_path),
+                    _ => None,
+                }?;
+                let has_slot = render_fn_to_slot.get(render_fn).copied().unwrap_or(false);
+                Some((imp.name.as_str(), has_slot))
+            })
+            .collect();
+
+        // Does this component itself have a slot?
+        let has_slot = parser::has_slot(&pf.ast.root);
+
         let prop_fields = semantic_db.as_ref().map(|db| &db.props_types);
         let generated = codegen::generate_with_imports(
             &pf.ast,
@@ -277,6 +312,8 @@ pub fn generate_all_with_options(opts: GenerateOptions) -> Result<()> {
             own_props_type,
             &import_props,
             prop_fields,
+            &import_has_slots,
+            has_slot,
         );
         output.push_str(&generated);
         output.push('\n');

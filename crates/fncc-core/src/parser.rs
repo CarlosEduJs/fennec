@@ -288,6 +288,21 @@ fn parse_fui_imports(path: &str) -> Option<Vec<ComponentImport>> {
     }
 }
 
+/// Check if an element tree contains a `<Slot>` element.
+pub fn has_slot(el: &Element) -> bool {
+    if el.name == "Slot" {
+        return true;
+    }
+    for child in &el.children {
+        if let Node::Element(child_el) = child
+            && has_slot(child_el)
+        {
+            return true;
+        }
+    }
+    false
+}
+
 /// Check whether an element tree contains `{props.field}` interpolation.
 /// Used to determine if a component actually receives props (vs merely referencing
 /// a PropsType import for a child component).
@@ -334,6 +349,35 @@ pub fn collect_commands(el: &Element) -> Vec<String> {
         }
     }
     cmds
+}
+
+/// Get the `each` attribute value from a `<For>` element.
+pub fn get_each_attr(el: &Element) -> Option<&str> {
+    el.attrs.iter().find(|(n, _)| n == "each").map(|(_, v)| v.as_str())
+}
+
+/// Get the `let` attribute value from a `<For>` element.
+pub fn get_let_attr(el: &Element) -> Option<&str> {
+    el.attrs.iter().find(|(n, _)| n == "let").map(|(_, v)| v.as_str())
+}
+
+/// Get the `index` attribute value from a `<For>` element.
+pub fn get_index_attr(el: &Element) -> Option<&str> {
+    el.attrs.iter().find(|(n, _)| n == "index").map(|(_, v)| v.as_str())
+}
+
+/// Get the `condition` attribute value from an `<If>` or `<ElseIf>` element.
+pub fn get_condition_attr(el: &Element) -> Option<&str> {
+    el.attrs.iter().find(|(n, _)| n == "condition").map(|(_, v)| v.as_str())
+}
+
+impl AttrValue {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            AttrValue::String(s) => s,
+            AttrValue::Interpolation(s) => s,
+        }
+    }
 }
 
 fn parse_gpui_imports(path: &str) -> Option<Vec<ComponentImport>> {

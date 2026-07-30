@@ -1,0 +1,29 @@
+---
+@state FlowState
+---
+
+<Stack direction="vertical" gap="12">
+    <Text size="xl">Control Flow Demo</Text>
+
+    <Text>Count: {state.count}</Text>
+
+    <Stack direction="horizontal" gap="8">
+        <Button onclick="increment">+1</Button>
+        <Button onclick="toggle_details">Toggle Details</Button>
+    </Stack>
+
+    <If condition="{state.show_details}">
+        <Text size="sm">Details section is visible</Text>
+        <For each="{state.items}" let="item" index="i">
+            <Text>  {i}. {item}</Text>
+        </For>
+    </If>
+    <Else>
+        <Text size="sm">Details hidden — click toggle</Text>
+    </Else>
+
+    <Fragment>
+        <Text size="base">Always rendered</Text>
+        <Text>Fragment groups children without extra nesting</Text>
+    </Fragment>
+</Stack>
