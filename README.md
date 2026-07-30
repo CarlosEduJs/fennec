@@ -213,15 +213,14 @@ The macro generates a **trampoline** (`__fncc_cmd_{name}`) that adapts the user'
 - [x] Command trampoline system
 - [x] Multi-file component imports (`use ui::path::Name;` syntax, recursive scan, import resolution)
 - [x] Typed component props (`#[derive(fncc::Props)]`, `use props::HeaderProps`, `{props.field}`, caller validation)
+- [x] LANGUAGE
+    - [x] `<If>`
+    - [x] `<Else>`
+    - [x] `<For>`
+    - [x] `<Fragment>`
+    - [x] `<Slot>`
 
 ### Next
-
-- [ ] LANGUAGE
-    - [ ] `<If>`
-    - [ ] `<Else>`
-    - [ ] `<For>`
-    - [ ] `<Fragment>`
-    - [ ] `<Slot>`
 
 - [ ] Freeze the syntax and grammar.
 
