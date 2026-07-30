@@ -387,12 +387,68 @@ fn increment(state: &mut CounterState, cx: &mut Context<CounterState>) {
 
 The compiler infers `CounterState` as the component state type from the `increment` command signature. No `@state` needed.
 
+### Typed component props
+
+Props are Rust structs with `#[derive(fncc::Props)]` that the parser extracts from `.rs` files via the same `syn`-based scanning used for commands.
+
+**`#[derive(fncc::Props)]` struct scanning** — `extract_props_types()` walks the AST looking for structs annotated with `#[derive(Props)]` or `#[derive(fncc::Props)]`. For each, it extracts field names, type expressions, and whether the field wraps `Option<T>`.
+
+**`PropField` structure:**
+```rust
+pub struct PropField {
+    pub name: String,      // e.g. "title"
+    pub type_expr: String, // e.g. "String"
+    pub is_optional: bool,  // true if field type is Option<T>
+}
+```
+
+**How it flows:**
+1. `extract_props_types()` populates `SemanticDb.props_types: HashMap<String, Vec<PropField>>` (struct name → fields)
+2. In `generate_all_with_options()`, a `render_fn_to_props` index maps each component's render function name to its props type name
+3. For each `.fui` file, `import_props` resolves which imported components have props
+4. `own_props_type` is set only when the template actually uses `{props.xxx}` — prevents a parent that merely references a child's props type from gaining a `props` parameter itself
+5. `validate_props_usage()` checks every element against its imported component's field definitions — unknown attributes and missing required (non-`Option`) fields produce hard errors
+
+**In `.fui`:**
+```fui
+---
+use props::HeaderProps;
+---
+<Text>{props.title}</Text>
+```
+
+**In caller `.fui`:**
+```fui
+---
+use ui::components::Header;
+---
+<Header title="Welcome" />
+```
+
+**Grouped imports work:**
+```fui
+---
+use props::{HeaderProps, FooterProps};
+```
+
+**Codegen output:**
+```rust
+// Stateless component with props
+pub fn render_header(props: &HeaderProps) -> impl IntoElement {
+    div().child(div().child(format!("{}", props.title)))
+}
+
+// Caller constructs the props struct
+render_header(&HeaderProps { title: "Welcome".into() })
+```
+
 ### `SemanticDb` — compiler foundation
 
 ```rust
 pub struct SemanticDb {
     pub commands: HashMap<String, CommandDef>,
     pub diagnostics: Vec<Diagnostic>,
+    pub props_types: HashMap<String, Vec<PropField>>,
 }
 
 pub struct CommandDef {
@@ -403,14 +459,14 @@ pub struct CommandDef {
 }
 ```
 
-This structure is designed to grow: future versions will add `components`, `state_types`, `props`, and `types` fields, feeding into codegen, LSP metadata, documentation generation, and incremental compilation.
+This structure is designed to grow: future versions will add `components`, `state_types`, and `types` fields, feeding into codegen, LSP metadata, documentation generation, and incremental compilation.
 
 ### Future phases
 
 | Phase | Feature | Depends on |
 |-------|---------|-----------|
 | P1 | Command scanning + state inference | ✅ Done |
-| P2 | Typed component props | `SemanticDb.components` + `.fui` attribute validation |
+| P2 | Typed component props | ✅ Done |
 | P3 | LSP metadata generation | `SemanticDb.to_lsp_metadata()` serialization |
 | P4 | Incremental compilation | `SemanticDb` cache + file-change tracking |
 
