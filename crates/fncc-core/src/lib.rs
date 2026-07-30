@@ -276,8 +276,11 @@ pub fn generate_all_with_options(opts: GenerateOptions) -> Result<()> {
             );
         }
 
+        // Does this component itself have a slot? (computed once, used for both validation and codegen)
+        let has_slot = parser::has_slot(&pf.ast.root);
+
         // Stateful components cannot have slots
-        if resolved_state.is_some() && parser::has_slot(&pf.ast.root) {
+        if resolved_state.is_some() && has_slot {
             anyhow::bail!(
                 "in '{}': stateful components cannot use `<Slot>` — slots are only supported on stateless components",
                 pf.path.display(),
@@ -299,9 +302,6 @@ pub fn generate_all_with_options(opts: GenerateOptions) -> Result<()> {
             })
             .collect();
 
-        // Does this component itself have a slot?
-        let has_slot = parser::has_slot(&pf.ast.root);
-
         let prop_fields = semantic_db.as_ref().map(|db| &db.props_types);
         let generated = codegen::generate_with_imports(
             &pf.ast,
@@ -313,7 +313,6 @@ pub fn generate_all_with_options(opts: GenerateOptions) -> Result<()> {
             &import_props,
             prop_fields,
             &import_has_slots,
-            has_slot,
         );
         output.push_str(&generated);
         output.push('\n');

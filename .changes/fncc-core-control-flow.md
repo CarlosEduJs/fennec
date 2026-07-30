@@ -14,7 +14,7 @@ Introduces `<If>`, `<Else>`, `<ElseIf>`, `<For>`, `<Fragment>`, and `<Slot>` ele
 
 - **`<Fragment>` long-form only**: Short syntax (`<>...</>`) was considered but deferred. `<Fragment>` wraps children in `div()`.
 
-- **Slots limited to stateless components**: Stateful components with `<Slot>` produce a compile-time build error via `lib.rs:render_fn_to_slot` check. Stateless components gain a `children: impl IntoElement` parameter in their generated render function.
+- **Slots limited to stateless components**: Stateful components with `<Slot>` produce a compile-time build error via the `parser::has_slot(&pf.ast.root)` guard in `lib.rs`. Stateless components gain a `children: impl IntoElement` parameter in their generated render function.
 
 - **`collect_if_chain()`**: Adjacent `<If>`/`<ElseIf>`/`<Else>` siblings are grouped into a single Rust `if/else if/else` expression. Without this, consecutive siblings would each wrap in their own `div().child(...)`, breaking the logical chain.
 
@@ -92,8 +92,7 @@ Loop variables (`todo`, `idx`) are NOT prefixed with `self.` — they reference 
 ### Technical infrastructure added
 
 - `parser.rs`: `has_slot()`, `get_each_attr()`, `get_let_attr()`, `get_index_attr()`, `get_condition_attr()`; `AttrValue::as_str()` made `pub(crate)`
-- `codegen.rs`: `gen_if_expr()`, `gen_for_expr()`, `gen_fragment()`, `generate_children_code()`, `collect_if_chain()`, `clean_inline()`, slot-aware `generate_stateless()` with `children: impl IntoElement` param; `import_has_slots: &[(&str, bool)]` plumbed through all gen_* functions
-- `lib.rs`: `render_fn_to_slot` index for detecting slots per render function; build-time error for stateful+slot conflict
+- `codegen.rs`: `gen_if_expr()`, `gen_for_expr()`, `gen_fragment()`, `generate_children_code()`, `collect_if_chain()`, `clean_inline()`, `replace_self_prefix()`, slot-aware `generate_stateless()` with `children: impl IntoElement` param; `import_has_slots: &[(&str, bool)]` plumbed through gen_* functions; `has_slot` derived internally from `doc.root`; slotted import call-site wiring passes children expression to render function call; string escape fix via `{:?}` at all literal emission sites
 - `apps/flow-app`: new workspace member with full stateful If/Else/For/Fragment demo (count, toggle details, iterated items)
 
 ### Testing
