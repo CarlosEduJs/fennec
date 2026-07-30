@@ -1,6 +1,10 @@
 # Changelog - fncc
 
 All notable changes to `fncc` crate will be documented in this file.
+## [0.1.2] - 2026-07-30
+
+- Re-export #[derive(Props)] from fncc-macros; updated workspace dependency version references
+
 ## [0.1.1] - 2026-07-29
 
 Updated internal workspace dependency version references.

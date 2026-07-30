@@ -1,6 +1,13 @@
 # Changelog - fncc-core
 
 All notable changes to `fncc-core` crate will be documented in this file.
+## [0.5.0] - 2026-07-30
+
+- Add typed component props support: #[derive(Props)] struct scanning (with fncc::Props support), ImportSource::PropsType variant, generate_with_imports extended with props parameters, interpolation_expr helper for props.field resolution
+- Add PropField.is_optional to detect Option<T> fields
+- Add validate_props_usage: hard errors for unknown attributes and missing required (non-Option) fields
+- Add 5 validation tests for error/success paths
+
 ## [0.4.0] - 2026-07-29
 
 ### Semantic Analysis — compiler foundation (`semantic::SemanticDb`, `GenerateOptions`)
