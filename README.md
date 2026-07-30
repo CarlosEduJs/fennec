@@ -215,15 +215,32 @@ The macro generates a **trampoline** (`__fncc_cmd_{name}`) that adapts the user'
 - [x] Typed component props (`#[derive(fncc::Props)]`, `use props::HeaderProps`, `{props.field}`, caller validation)
 
 ### Next
+
+- [ ] LANGUAGE
+    - [ ] `<If>`
+    - [ ] `<Else>`
+    - [ ] `<For>`
+    - [ ] `<Fragment>`
+    - [ ] `<Slot>`
+
+- [ ] Freeze the syntax and grammar.
+
+- [ ] LSP metadata generation
+    - [ ] autocomplete
+    - [ ] diagnostics
+    - [ ] hover
+    - [ ] rename
+    - [ ] go to definition
+- [ ] Styling system: FNCC Styles
+    - [ ] `<style>`
+    - [ ] `classes`
+    - [ ] `theme`
+    - [ ] `tokens`
+    - [ ] `style compiler`
+    - [ ] `variables`
 - [ ] `fncc` CLI (`fncc build`, `fncc dev`)
 - [ ] More components (Input, Image, List, Scroll)
 - [ ] Hot reload
-- [x] Semantic analysis — foundation (`semantic::SemanticDb`, `GenerateOptions`)
-  - [x] Command extraction from `.rs` files via `syn`
-  - [x] Automatic state inference (remove `@state`)
-  - [x] Hard-error command resolution (`onclick` → `#[fncc::command]` validation)
-  - [x] Typed component props
-  - [ ] LSP metadata generation
 
 ## Related projects
 
