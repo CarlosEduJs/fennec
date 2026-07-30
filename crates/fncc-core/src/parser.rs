@@ -99,7 +99,7 @@ pub fn parse(source: &str) -> Result<Document, String> {
                 }
             }
             Rule::element => {
-                root = Some(parse_element(inner));
+                root = Some(parse_element(inner)?);
             }
             _ => {}
         }
@@ -113,7 +113,7 @@ pub fn parse(source: &str) -> Result<Document, String> {
     })
 }
 
-fn parse_element(pair: Pair<Rule>) -> Element {
+fn parse_element(pair: Pair<Rule>) -> Result<Element, String> {
     let mut name = String::new();
     let mut attrs = Vec::new();
     let mut children = Vec::new();
@@ -154,7 +154,7 @@ fn parse_element(pair: Pair<Rule>) -> Element {
                     let actual = child.into_inner().next().expect("node should have one child");
                     match actual.as_rule() {
                         Rule::element => {
-                            children.push(Node::Element(parse_element(actual)));
+                            children.push(Node::Element(parse_element(actual)?));
                         }
                         Rule::inner_text => {
                             let text = actual.as_str().trim().to_string();
@@ -182,11 +182,13 @@ fn parse_element(pair: Pair<Rule>) -> Element {
         }
     }
 
-    if let Some(ref close) = close_name {
-        assert_eq!(&name, close, "mismatched close tag: </{close}> does not match <{name}>");
+    if let Some(ref close) = close_name
+        && &name != close
+    {
+        return Err(format!("mismatched close tag: </{close}> does not match <{name}>"));
     }
 
-    Element { name, attrs, children }
+    Ok(Element { name, attrs, children })
 }
 
 fn parse_attr(pair: Pair<Rule>) -> (String, AttrValue) {
@@ -630,9 +632,11 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "mismatched close tag")]
-    fn test_mismatched_close_tag_panics() {
-        parse("<Div></Text>").unwrap();
+    fn test_mismatched_close_tag_returns_error() {
+        let result = parse("<Div></Text>");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("mismatched close tag"), "error: {err}");
     }
 
     #[test]
