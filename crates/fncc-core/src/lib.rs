@@ -104,18 +104,22 @@ pub fn generate_all_with_options(opts: GenerateOptions) -> Result<()> {
     }
 
     // Build props type index: render_fn_name -> props type name (e.g. "HeaderProps")
-    // Derived from "use props::HeaderProps;" in the component's own frontmatter.
+    // Only set when the component's template actually uses {props.xxx} interpolation.
     let mut render_fn_to_props: HashMap<String, Option<String>> = HashMap::new();
     for pf in &parsed_files {
         let component_name = pf.relative_stem.split('/').next_back().unwrap_or("");
         let render_fn = format!("render_{}", codegen::to_snake_case(component_name));
-        let props_type = pf.ast.imports.iter().find_map(|imp| {
-            if matches!(imp.source, parser::ImportSource::PropsType) {
-                Some(imp.name.clone())
-            } else {
-                None
-            }
-        });
+        let props_type = parser::uses_props_interpolation(&pf.ast.root)
+            .then(|| {
+                pf.ast.imports.iter().find_map(|imp| {
+                    if matches!(imp.source, parser::ImportSource::PropsType) {
+                        Some(imp.name.clone())
+                    } else {
+                        None
+                    }
+                })
+            })
+            .flatten();
         render_fn_to_props.insert(render_fn, props_type);
     }
 
@@ -254,6 +258,16 @@ pub fn generate_all_with_options(opts: GenerateOptions) -> Result<()> {
 
         let component_name = pf.relative_stem.split('/').next_back();
         let resolved_state = state_types.get(&file_id).and_then(|s| s.as_deref());
+
+        // Stateful components cannot receive props
+        if resolved_state.is_some() && own_props_type.is_some() {
+            anyhow::bail!(
+                "in '{}': component cannot have both state and props — props are only supported on stateless components",
+                pf.path.display(),
+            );
+        }
+
+        let prop_fields = semantic_db.as_ref().map(|db| &db.props_types);
         let generated = codegen::generate_with_imports(
             &pf.ast,
             file_id,
@@ -262,6 +276,7 @@ pub fn generate_all_with_options(opts: GenerateOptions) -> Result<()> {
             resolved_state,
             own_props_type,
             &import_props,
+            prop_fields,
         );
         output.push_str(&generated);
         output.push('\n');

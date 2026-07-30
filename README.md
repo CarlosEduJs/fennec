@@ -150,6 +150,7 @@ use ui::components::Header;
 - Grouped imports work: `use props::{HeaderProps, FooterProps};`
 
 ### Validation (hard errors at build time)
+
 | Scenario | Error |
 |---|---|
 | Unknown attribute: `<Header unknown="x" />` | `component 'Header' has no prop 'unknown'` |
