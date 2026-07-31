@@ -5,8 +5,8 @@ homepage = "https://github.com/carlosedujs/fncc"
 license = "Apache-2.0"
 name = "fncc"
 repository = "https://github.com/carlosedujs/fncc"
-version = "0.1.2"
+version = "0.1.3"
 
 [dependencies]
 fncc-macros = { path = "../fncc-macros", version = "0.1.2" }
-fncc-runtime = { path = "../fncc-runtime", version = "0.1.0" }
+fncc-runtime = { path = "../fncc-runtime", version = "0.2.0" }
