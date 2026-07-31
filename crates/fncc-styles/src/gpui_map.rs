@@ -18,72 +18,116 @@ pub fn map(name: &str, value: &str) -> Result<Vec<GPUIMethodCall>, String> {
             code: format!("flex_{value}"),
         }]),
         "align-items" | "align_items" => match value {
-            "flex-start" | "start" => Ok(vec![GPUIMethodCall { code: "items_start()".into() }]),
-            "flex-end" | "end" => Ok(vec![GPUIMethodCall { code: "items_end()".into() }]),
-            "center" => Ok(vec![GPUIMethodCall { code: "items_center()".into() }]),
-            "baseline" => Ok(vec![GPUIMethodCall { code: "items_baseline()".into() }]),
+            "flex-start" | "start" => Ok(vec![GPUIMethodCall {
+                code: "items_start()".into(),
+            }]),
+            "flex-end" | "end" => Ok(vec![GPUIMethodCall {
+                code: "items_end()".into(),
+            }]),
+            "center" => Ok(vec![GPUIMethodCall {
+                code: "items_center()".into(),
+            }]),
+            "baseline" => Ok(vec![GPUIMethodCall {
+                code: "items_baseline()".into(),
+            }]),
             "stretch" => Ok(vec![]),
             other => Err(format!("unsupported align-items: `{other}`")),
         },
         "justify-content" | "justify_content" => match value {
-            "flex-start" | "start" => Ok(vec![GPUIMethodCall { code: "justify_start()".into() }]),
-            "flex-end" | "end" => Ok(vec![GPUIMethodCall { code: "justify_end()".into() }]),
-            "center" => Ok(vec![GPUIMethodCall { code: "justify_center()".into() }]),
-            "space-between" => Ok(vec![GPUIMethodCall { code: "justify_between()".into() }]),
-            "space-around" => Ok(vec![GPUIMethodCall { code: "justify_around()".into() }]),
+            "flex-start" | "start" => Ok(vec![GPUIMethodCall {
+                code: "justify_start()".into(),
+            }]),
+            "flex-end" | "end" => Ok(vec![GPUIMethodCall {
+                code: "justify_end()".into(),
+            }]),
+            "center" => Ok(vec![GPUIMethodCall {
+                code: "justify_center()".into(),
+            }]),
+            "space-between" => Ok(vec![GPUIMethodCall {
+                code: "justify_between()".into(),
+            }]),
+            "space-around" => Ok(vec![GPUIMethodCall {
+                code: "justify_around()".into(),
+            }]),
             other => Err(format!("unsupported justify-content: `{other}`")),
         },
         "gap" => {
             let c = format_dim(value)?;
-            Ok(vec![GPUIMethodCall { code: format!("gap({c})") }])
+            Ok(vec![GPUIMethodCall {
+                code: format!("gap({c})"),
+            }])
         }
         "padding" => {
             let c = format_dim(value)?;
-            Ok(vec![GPUIMethodCall { code: format!("p({c})") }])
+            Ok(vec![GPUIMethodCall {
+                code: format!("p({c})"),
+            }])
         }
         "padding-left" | "pl" => {
             let c = format_dim(value)?;
-            Ok(vec![GPUIMethodCall { code: format!("pl({c})") }])
+            Ok(vec![GPUIMethodCall {
+                code: format!("pl({c})"),
+            }])
         }
         "padding-right" | "pr" => {
             let c = format_dim(value)?;
-            Ok(vec![GPUIMethodCall { code: format!("pr({c})") }])
+            Ok(vec![GPUIMethodCall {
+                code: format!("pr({c})"),
+            }])
         }
         "padding-top" | "pt" => {
             let c = format_dim(value)?;
-            Ok(vec![GPUIMethodCall { code: format!("pt({c})") }])
+            Ok(vec![GPUIMethodCall {
+                code: format!("pt({c})"),
+            }])
         }
         "padding-bottom" | "pb" => {
             let c = format_dim(value)?;
-            Ok(vec![GPUIMethodCall { code: format!("pb({c})") }])
+            Ok(vec![GPUIMethodCall {
+                code: format!("pb({c})"),
+            }])
         }
         "margin" => {
             let c = format_dim(value)?;
-            Ok(vec![GPUIMethodCall { code: format!("m({c})") }])
+            Ok(vec![GPUIMethodCall {
+                code: format!("m({c})"),
+            }])
         }
         "width" | "w" => {
             let c = format_dim(value)?;
-            Ok(vec![GPUIMethodCall { code: format!("w({c})") }])
+            Ok(vec![GPUIMethodCall {
+                code: format!("w({c})"),
+            }])
         }
         "height" | "h" => {
             let c = format_dim(value)?;
-            Ok(vec![GPUIMethodCall { code: format!("h({c})") }])
+            Ok(vec![GPUIMethodCall {
+                code: format!("h({c})"),
+            }])
         }
         "min-width" | "min_w" => {
             let c = format_dim(value)?;
-            Ok(vec![GPUIMethodCall { code: format!("min_w({c})") }])
+            Ok(vec![GPUIMethodCall {
+                code: format!("min_w({c})"),
+            }])
         }
         "max-width" | "max_w" => {
             let c = format_dim(value)?;
-            Ok(vec![GPUIMethodCall { code: format!("max_w({c})") }])
+            Ok(vec![GPUIMethodCall {
+                code: format!("max_w({c})"),
+            }])
         }
         "min-height" | "min_h" => {
             let c = format_dim(value)?;
-            Ok(vec![GPUIMethodCall { code: format!("min_h({c})") }])
+            Ok(vec![GPUIMethodCall {
+                code: format!("min_h({c})"),
+            }])
         }
         "max-height" | "max_h" => {
             let c = format_dim(value)?;
-            Ok(vec![GPUIMethodCall { code: format!("max_h({c})") }])
+            Ok(vec![GPUIMethodCall {
+                code: format!("max_h({c})"),
+            }])
         }
         "background" | "bg" => {
             let c = parse_color(value)?;
@@ -99,7 +143,9 @@ pub fn map(name: &str, value: &str) -> Result<Vec<GPUIMethodCall>, String> {
         }
         "border-radius" | "rounded" => {
             let c = format_dim(value)?;
-            Ok(vec![GPUIMethodCall { code: format!("rounded({c})") }])
+            Ok(vec![GPUIMethodCall {
+                code: format!("rounded({c})"),
+            }])
         }
         "border-width" | "border_width" => {
             let n = parse_dim(value)?;
@@ -175,6 +221,15 @@ pub fn map(name: &str, value: &str) -> Result<Vec<GPUIMethodCall>, String> {
                 },
             };
             Ok(vec![call])
+        }
+        "font-family" | "font_family" => {
+            let family = value.trim().trim_matches(['"', '\'']).to_string();
+            if family.is_empty() {
+                return Err("empty font-family value".into());
+            }
+            Ok(vec![GPUIMethodCall {
+                code: format!("font_family({family:?})"),
+            }])
         }
         "font-weight" | "font_weight" => match value {
             "bold" | "700" => Ok(vec![GPUIMethodCall {
@@ -388,6 +443,18 @@ mod tests {
     fn test_map_font_size() {
         let calls = map("font-size", "24px").unwrap();
         assert_eq!(calls[0].code, "text_2xl()");
+    }
+
+    #[test]
+    fn test_map_font_family() {
+        let calls = map("font-family", "\"Inter\"").unwrap();
+        assert_eq!(calls[0].code, "font_family(\"Inter\")");
+    }
+
+    #[test]
+    fn test_map_font_family_no_quotes() {
+        let calls = map("font-family", "Verdana").unwrap();
+        assert_eq!(calls[0].code, "font_family(\"Verdana\")");
     }
 
     #[test]

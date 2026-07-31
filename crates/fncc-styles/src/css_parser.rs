@@ -1,11 +1,7 @@
 use crate::Stylesheet;
-use std::collections::HashMap;
 
 pub fn parse(css: &str) -> Result<Stylesheet, String> {
-    let mut tokens = HashMap::new();
-    let mut themes = HashMap::new();
-    let mut rules = HashMap::new();
-    let mut inline_props = Vec::new();
+    let mut ss = Stylesheet::default();
 
     let mut expecting: Option<BlockKind> = None;
     let mut block_name: Option<String> = None;
@@ -29,15 +25,7 @@ pub fn parse(css: &str) -> Result<Stylesheet, String> {
         }
 
         if trimmed.starts_with(":root") && trimmed.contains('{') {
-            finalize(
-                &mut expecting,
-                &mut block_name,
-                &mut block_props,
-                &mut tokens,
-                &mut themes,
-                &mut rules,
-                &mut inline_props,
-            );
+            finalize(&mut expecting, &mut block_name, &mut block_props, &mut ss);
             expecting = Some(BlockKind::Tokens);
             block_name = None;
             block_props = Vec::new();
@@ -45,15 +33,7 @@ pub fn parse(css: &str) -> Result<Stylesheet, String> {
             if let Some(close_pos) = after_brace.rfind('}') {
                 let content = &after_brace[..close_pos];
                 parse_properties_into(content, &mut block_props);
-                finalize(
-                    &mut expecting,
-                    &mut block_name,
-                    &mut block_props,
-                    &mut tokens,
-                    &mut themes,
-                    &mut rules,
-                    &mut inline_props,
-                );
+                finalize(&mut expecting, &mut block_name, &mut block_props, &mut ss);
             } else if !after_brace.trim().is_empty() {
                 parse_properties_into(after_brace, &mut block_props);
             }
@@ -63,15 +43,7 @@ pub fn parse(css: &str) -> Result<Stylesheet, String> {
         if let Some(rest) = trimmed.strip_prefix("theme ")
             && let Some(name) = rest.split('{').next().map(|s| s.trim()).filter(|s| !s.is_empty())
         {
-            finalize(
-                &mut expecting,
-                &mut block_name,
-                &mut block_props,
-                &mut tokens,
-                &mut themes,
-                &mut rules,
-                &mut inline_props,
-            );
+            finalize(&mut expecting, &mut block_name, &mut block_props, &mut ss);
             expecting = Some(BlockKind::Theme);
             block_name = Some(name.to_string());
             block_props = Vec::new();
@@ -79,15 +51,23 @@ pub fn parse(css: &str) -> Result<Stylesheet, String> {
             if let Some(close_pos) = after_brace.rfind('}') {
                 let content = &after_brace[..close_pos];
                 parse_properties_into(content, &mut block_props);
-                finalize(
-                    &mut expecting,
-                    &mut block_name,
-                    &mut block_props,
-                    &mut tokens,
-                    &mut themes,
-                    &mut rules,
-                    &mut inline_props,
-                );
+                finalize(&mut expecting, &mut block_name, &mut block_props, &mut ss);
+            } else if !after_brace.trim().is_empty() {
+                parse_properties_into(after_brace, &mut block_props);
+            }
+            continue;
+        }
+
+        if trimmed.starts_with("@font-face") && trimmed.contains('{') {
+            finalize(&mut expecting, &mut block_name, &mut block_props, &mut ss);
+            expecting = Some(BlockKind::FontFace);
+            block_name = None;
+            block_props = Vec::new();
+            let after_brace = trimmed.split_once('{').map(|x| x.1).unwrap_or("");
+            if let Some(close_pos) = after_brace.rfind('}') {
+                let content = &after_brace[..close_pos];
+                parse_properties_into(content, &mut block_props);
+                finalize(&mut expecting, &mut block_name, &mut block_props, &mut ss);
             } else if !after_brace.trim().is_empty() {
                 parse_properties_into(after_brace, &mut block_props);
             }
@@ -97,15 +77,7 @@ pub fn parse(css: &str) -> Result<Stylesheet, String> {
         if let Some(dot_rest) = trimmed.strip_prefix('.')
             && let Some(name) = dot_rest.split('{').next().map(|s| s.trim()).filter(|s| !s.is_empty())
         {
-            finalize(
-                &mut expecting,
-                &mut block_name,
-                &mut block_props,
-                &mut tokens,
-                &mut themes,
-                &mut rules,
-                &mut inline_props,
-            );
+            finalize(&mut expecting, &mut block_name, &mut block_props, &mut ss);
             expecting = Some(BlockKind::Rules);
             block_name = Some(name.to_string());
             block_props = Vec::new();
@@ -113,15 +85,7 @@ pub fn parse(css: &str) -> Result<Stylesheet, String> {
             if let Some(close_pos) = after_brace.rfind('}') {
                 let content = &after_brace[..close_pos];
                 parse_properties_into(content, &mut block_props);
-                finalize(
-                    &mut expecting,
-                    &mut block_name,
-                    &mut block_props,
-                    &mut tokens,
-                    &mut themes,
-                    &mut rules,
-                    &mut inline_props,
-                );
+                finalize(&mut expecting, &mut block_name, &mut block_props, &mut ss);
             } else if !after_brace.trim().is_empty() {
                 parse_properties_into(after_brace, &mut block_props);
             }
@@ -129,15 +93,7 @@ pub fn parse(css: &str) -> Result<Stylesheet, String> {
         }
 
         if trimmed == "}" {
-            finalize(
-                &mut expecting,
-                &mut block_name,
-                &mut block_props,
-                &mut tokens,
-                &mut themes,
-                &mut rules,
-                &mut inline_props,
-            );
+            finalize(&mut expecting, &mut block_name, &mut block_props, &mut ss);
             continue;
         }
 
@@ -151,22 +107,9 @@ pub fn parse(css: &str) -> Result<Stylesheet, String> {
         }
     }
 
-    finalize(
-        &mut expecting,
-        &mut block_name,
-        &mut block_props,
-        &mut tokens,
-        &mut themes,
-        &mut rules,
-        &mut inline_props,
-    );
+    finalize(&mut expecting, &mut block_name, &mut block_props, &mut ss);
 
-    Ok(Stylesheet {
-        tokens,
-        themes,
-        rules,
-        inline_props,
-    })
+    Ok(ss)
 }
 
 pub fn parse_inline(style: &str) -> Result<Vec<(String, String)>, String> {
@@ -202,16 +145,14 @@ enum BlockKind {
     Tokens,
     Theme,
     Rules,
+    FontFace,
 }
 
 fn finalize(
     expecting: &mut Option<BlockKind>,
     block_name: &mut Option<String>,
     block_props: &mut Vec<(String, String)>,
-    tokens: &mut HashMap<String, String>,
-    themes: &mut HashMap<String, HashMap<String, String>>,
-    rules: &mut HashMap<String, Vec<(String, String)>>,
-    _inline_props: &mut Vec<(String, String)>,
+    ss: &mut Stylesheet,
 ) {
     let kind = match expecting.take() {
         Some(k) => k,
@@ -223,13 +164,13 @@ fn finalize(
         BlockKind::Tokens => {
             for (name, value) in props {
                 let key = name.trim_start_matches('$');
-                tokens.insert(format!("${key}"), value);
+                ss.tokens.insert(format!("${key}"), value);
             }
         }
         BlockKind::Theme => {
             let name = block_name.take();
             if let Some(theme_name) = name {
-                let entry = themes.entry(theme_name).or_default();
+                let entry = ss.themes.entry(theme_name).or_default();
                 for (n, v) in props {
                     let key = n.trim_start_matches('$');
                     entry.insert(format!("${key}"), v);
@@ -239,10 +180,33 @@ fn finalize(
         BlockKind::Rules => {
             let name = block_name.take();
             if let Some(class_name) = name {
-                rules.insert(class_name, props);
+                ss.rules.insert(class_name, props);
+            }
+        }
+        BlockKind::FontFace => {
+            let mut family = None;
+            let mut src = None;
+            for (k, v) in props {
+                match k.as_str() {
+                    "font-family" => family = Some(v.trim_matches(['"', '\'']).to_string()),
+                    "src" => src = Some(extract_url(&v)),
+                    _ => {}
+                }
+            }
+            if let (Some(fam), Some(path)) = (family, src)
+                && !fam.is_empty()
+                && !path.is_empty()
+            {
+                ss.fonts.insert(fam, path);
             }
         }
     }
+}
+
+fn extract_url(value: &str) -> String {
+    let v = value.trim();
+    let v = v.strip_prefix("url(").unwrap_or(v).strip_suffix(')').unwrap_or(v);
+    v.trim().trim_matches(['"', '\'']).trim().to_string()
 }
 
 #[cfg(test)]
@@ -312,5 +276,31 @@ theme dark {
         assert_eq!(ss.themes.get("dark").unwrap().get("$primary").unwrap(), "#003366");
         assert_eq!(ss.rules.get("btn").unwrap().len(), 3);
         assert_eq!(ss.rules.get("heading").unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_parse_font_face() {
+        let css = r#"
+@font-face {
+    font-family: "Inter";
+    src: url("./fonts/Inter.ttf");
+}
+"#;
+        let ss = parse(css).unwrap();
+        assert_eq!(ss.fonts.get("Inter").unwrap(), "./fonts/Inter.ttf");
+    }
+
+    #[test]
+    fn test_parse_font_face_no_quotes() {
+        let css = r#"@font-face { font-family: Verdana; src: url("fonts/Verdana.ttf"); }"#;
+        let ss = parse(css).unwrap();
+        assert_eq!(ss.fonts.get("Verdana").unwrap(), "fonts/Verdana.ttf");
+    }
+
+    #[test]
+    fn test_parse_font_face_skips_invalid() {
+        let css = r#"@font-face { src: url("./missing.ttf"); }"#;
+        let ss = parse(css).unwrap();
+        assert!(ss.fonts.is_empty());
     }
 }

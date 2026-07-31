@@ -18,7 +18,7 @@
         Card with class + inline styles
     </Text>
     <Text class="highlight">Token-based color via class</Text>
-    <Button class="card" style="background: $accent; color: white; display: flex; justify-content: center; align-items: center; w: 150px; h: 10px" onclick="handle_click">
+    <Button class="card" style="background: $accent; color: white; display: flex; justify-content: center; align-items: center; w: 150px; h: 30px" onclick="handle_click">
         Click: {state.count}
     </Button>
 </Stack>

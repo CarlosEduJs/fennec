@@ -14,6 +14,8 @@ pub struct Stylesheet {
     pub themes: HashMap<String, HashMap<String, String>>,
     pub rules: HashMap<String, Vec<(String, String)>>,
     pub inline_props: Vec<(String, String)>,
+    /// Custom fonts declared via `@font-face`: font-family name → file path.
+    pub fonts: HashMap<String, String>,
 }
 
 pub fn resolve(
@@ -74,20 +76,6 @@ fn resolve_value(raw: &str, tokens: &HashMap<String, String>) -> String {
     result
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_resolve_inline_style_with_token() {
-        let mut ss = Stylesheet::default();
-        ss.tokens.insert("$accent".into(), "#ff6600".into());
-        let calls = resolve(&[], Some("background: $accent; color: white"), &ss, None).unwrap();
-        assert!(calls.iter().any(|c| c.code == "bg(rgba(0xff6600ff))"));
-        assert!(calls.iter().any(|c| c.code == "text_color(rgba(0xffffffff))"));
-    }
-}
-
 pub fn merge(stylesheets: Vec<Stylesheet>) -> Stylesheet {
     let mut out = Stylesheet::default();
     for ss in stylesheets {
@@ -104,6 +92,21 @@ pub fn merge(stylesheets: Vec<Stylesheet>) -> Stylesheet {
             }
         }
         out.inline_props.extend(ss.inline_props);
+        out.fonts.extend(ss.fonts);
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resolve_inline_style_with_token() {
+        let mut ss = Stylesheet::default();
+        ss.tokens.insert("$accent".into(), "#ff6600".into());
+        let calls = resolve(&[], Some("background: $accent; color: white"), &ss, None).unwrap();
+        assert!(calls.iter().any(|c| c.code == "bg(rgba(0xff6600ff))"));
+        assert!(calls.iter().any(|c| c.code == "text_color(rgba(0xffffffff))"));
+    }
 }

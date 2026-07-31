@@ -64,7 +64,8 @@ sudo apt-get install libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev
 5. Themes activated via `@theme name` in frontmatter or global config
 6. Token/theme resolution is compile-time only
 7. Unknown CSS properties → hard build error; unknown classes → silently skipped
-8. Mapped GPUI subset: padding/margin/gap, flex/grid, size/min/max, background/color/border/radius/shadow, typography, overflow, position, cursor
+8. Mapped GPUI subset: padding/margin/gap, flex/grid, size/min/max, background/color/border/radius/shadow, typography (incl. `font-family`), overflow, position, cursor, align-items, justify-content
+9. Custom fonts via `@font-face { font-family: X; src: url("./fonts/X.ttf"); }` in `.fncss`; font files are copied to `$OUT_DIR/fncc_fonts` and a `fncc_load_fonts(cx: &mut App)` function is generated — call it in app startup before opening windows
 
 ## #[fncc::command] levels
 

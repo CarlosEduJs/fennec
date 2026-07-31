@@ -16,6 +16,7 @@ fn handle_click(state: &mut StylesState, cx: &mut Context<StylesState>) {
 
 fn main() {
     Application::new().run(|cx: &mut App| {
+        fncc_load_fonts(cx);
         let bounds = Bounds::centered(None, size(px(500.), px(350.)), cx);
         cx.open_window(
             WindowOptions {
