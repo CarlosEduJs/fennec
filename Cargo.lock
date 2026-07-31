@@ -1824,6 +1824,7 @@ name = "fncc-core"
 version = "0.6.0"
 dependencies = [
  "anyhow",
+ "fncc-styles",
  "pest",
  "pest_derive",
  "quote",
@@ -1853,6 +1854,18 @@ name = "fncc-runtime"
 version = "0.1.0"
 dependencies = [
  "gpui",
+]
+
+[[package]]
+name = "fncc-styles"
+version = "0.1.0"
+
+[[package]]
+name = "fncc-styles-app"
+version = "0.0.0"
+dependencies = [
+ "fncc",
+ "fncc-core",
 ]
 
 [[package]]

@@ -10,7 +10,7 @@ pub fn generate(doc: &Document) -> String {
 }
 
 pub fn generate_with_id(doc: &Document, file_id: usize) -> String {
-    generate_with_imports(doc, file_id, &[], None, None, None, &[], None, &[])
+    generate_with_imports(doc, file_id, &[], None, None, None, &[], None, &[], None, None)
 }
 
 /// Resolved import entry: (tag_name, render_fn_name)
@@ -32,6 +32,8 @@ pub fn generate_with_imports(
     import_props: &[(&str, Option<&str>)],
     prop_fields: Option<&HashMap<String, Vec<PropField>>>,
     import_has_slots: &[(&str, bool)],
+    style_cascade: Option<&fncc_styles::Stylesheet>,
+    style_theme: Option<&str>,
 ) -> String {
     let mut out = String::new();
     let state_type = resolved_state_type.or(doc.state_type.as_deref());
@@ -43,7 +45,6 @@ pub fn generate_with_imports(
         out.push('\n');
     }
 
-    // collect referenced command names for validation
     let commands = parser::collect_commands(&doc.root);
     if !commands.is_empty() {
         out.push_str("#[allow(unused)]\n");
@@ -64,6 +65,8 @@ pub fn generate_with_imports(
             import_props,
             prop_fields,
             import_has_slots,
+            style_cascade,
+            style_theme,
         );
     } else {
         generate_stateless(
@@ -76,6 +79,8 @@ pub fn generate_with_imports(
             prop_fields,
             import_has_slots,
             has_slot,
+            style_cascade,
+            style_theme,
         );
     }
 
@@ -92,11 +97,12 @@ fn generate_stateless(
     prop_fields: Option<&HashMap<String, Vec<PropField>>>,
     import_has_slots: &[(&str, bool)],
     has_slot: bool,
+    style_cascade: Option<&fncc_styles::Stylesheet>,
+    style_theme: Option<&str>,
 ) {
     let name = component_name.unwrap_or(&doc.root.name);
     let fn_name = format!("render_{}", to_snake_case(name));
 
-    // Build function signature based on props and slot
     let params = match (props_type, has_slot) {
         (Some(pt), true) => format!("props: &{pt}, children: impl IntoElement"),
         (Some(pt), false) => format!("props: &{pt}"),
@@ -118,6 +124,8 @@ fn generate_stateless(
         import_props,
         prop_fields,
         import_has_slots,
+        style_cascade,
+        style_theme,
     ));
     out.push('\n');
     out.push_str("}\n");
@@ -131,6 +139,8 @@ fn generate_stateful(
     import_props: &[(&str, Option<&str>)],
     prop_fields: Option<&HashMap<String, Vec<PropField>>>,
     _import_has_slots: &[(&str, bool)],
+    style_cascade: Option<&fncc_styles::Stylesheet>,
+    style_theme: Option<&str>,
 ) {
     let state_type = state_type.unwrap_or("Self");
 
@@ -145,6 +155,8 @@ fn generate_stateful(
         import_props,
         prop_fields,
         _import_has_slots,
+        style_cascade,
+        style_theme,
     ));
     out.push_str("\n    }\n");
     out.push_str("}\n");
@@ -185,6 +197,8 @@ fn gen_if_expr(
     import_props: &[(&str, Option<&str>)],
     prop_fields: Option<&HashMap<String, Vec<PropField>>>,
     _import_has_slots: &[(&str, bool)],
+    style_cascade: Option<&fncc_styles::Stylesheet>,
+    style_theme: Option<&str>,
 ) -> String {
     let mut expr = String::new();
     for (i, el) in branches.iter().enumerate() {
@@ -224,6 +238,8 @@ fn gen_if_expr(
                         import_props,
                         prop_fields,
                         _import_has_slots,
+                        style_cascade,
+                        style_theme,
                     );
                     expr.push_str(&format!("div().child({})", clean_inline(&child_code)));
                 }
@@ -246,6 +262,8 @@ fn gen_if_expr(
                                 import_props,
                                 prop_fields,
                                 _import_has_slots,
+                                style_cascade,
+                                style_theme,
                             );
                             expr.push_str(&format!(".child({})", clean_inline(&child_code)));
                         }
@@ -270,6 +288,8 @@ fn gen_for_expr(
     import_props: &[(&str, Option<&str>)],
     prop_fields: Option<&HashMap<String, Vec<PropField>>>,
     _import_has_slots: &[(&str, bool)],
+    style_cascade: Option<&fncc_styles::Stylesheet>,
+    style_theme: Option<&str>,
 ) -> String {
     let each = match parser::get_each_attr(el) {
         Some(e) => e,
@@ -299,6 +319,8 @@ fn gen_for_expr(
                     import_props,
                     prop_fields,
                     _import_has_slots,
+                    style_cascade,
+                    style_theme,
                 );
                 body.push_str(&child_code);
             }
@@ -321,6 +343,8 @@ fn gen_for_expr(
                             import_props,
                             prop_fields,
                             _import_has_slots,
+                            style_cascade,
+                            style_theme,
                         );
                         body.push_str(&format!(".child({})", clean_inline(&child_code)));
                     }
@@ -352,164 +376,277 @@ fn generate_element(
     import_props: &[(&str, Option<&str>)],
     prop_fields: Option<&HashMap<String, Vec<PropField>>>,
     _import_has_slots: &[(&str, bool)],
+    style_cascade: Option<&fncc_styles::Stylesheet>,
+    style_theme: Option<&str>,
 ) -> String {
     let indent = "    ".repeat(depth);
 
-    // Built-in elements
-    match el.name.as_str() {
-        "Stack" => {
-            return gen_stack(
+    let code = match el.name.as_str() {
+        "Stack" => gen_stack(
+            el,
+            &indent,
+            depth,
+            stateful,
+            imports,
+            import_props,
+            prop_fields,
+            _import_has_slots,
+            style_cascade,
+            style_theme,
+        ),
+        "Text" => gen_text(
+            el,
+            &indent,
+            depth,
+            stateful,
+            imports,
+            import_props,
+            prop_fields,
+            _import_has_slots,
+            style_cascade,
+            style_theme,
+        ),
+        "Button" => gen_button(
+            el,
+            &indent,
+            depth,
+            stateful,
+            imports,
+            import_props,
+            prop_fields,
+            _import_has_slots,
+            style_cascade,
+            style_theme,
+        ),
+        "Fragment" => gen_fragment(
+            el,
+            &indent,
+            depth,
+            stateful,
+            imports,
+            import_props,
+            prop_fields,
+            _import_has_slots,
+        ),
+        "For" => format!(
+            "div().children({})",
+            gen_for_expr(
                 el,
-                &indent,
-                depth,
                 stateful,
                 imports,
                 import_props,
                 prop_fields,
                 _import_has_slots,
-            );
-        }
-        "Text" => {
-            return gen_text(
-                el,
-                &indent,
-                depth,
-                stateful,
-                imports,
-                import_props,
-                prop_fields,
-                _import_has_slots,
-            );
-        }
-        "Button" => {
-            return gen_button(
-                el,
-                &indent,
-                depth,
-                stateful,
-                imports,
-                import_props,
-                prop_fields,
-                _import_has_slots,
-            );
-        }
-        "Fragment" => {
-            return gen_fragment(
-                el,
-                &indent,
-                depth,
-                stateful,
-                imports,
-                import_props,
-                prop_fields,
-                _import_has_slots,
-            );
-        }
-        "For" => {
-            return format!(
-                "div().children({})",
-                gen_for_expr(el, stateful, imports, import_props, prop_fields, _import_has_slots)
-            );
-        }
+                style_cascade,
+                style_theme
+            )
+        ),
         "If" | "ElseIf" | "Else" => {
-            // Standalone — generate if-expression with no else
             let branches = [el];
-            return gen_if_expr(
+            gen_if_expr(
                 &branches,
                 stateful,
                 imports,
                 import_props,
                 prop_fields,
                 _import_has_slots,
-            );
+                style_cascade,
+                style_theme,
+            )
         }
-        "Slot" => return "children".to_string(),
-        _ => {}
-    }
-
-    // .fui component imports (have a non-empty render function name)
-    if let Some(render_fn) = imports
-        .iter()
-        .find(|(name, fn_name)| name == &el.name && !fn_name.is_empty())
-        .map(|(_, fn_name)| *fn_name)
-    {
-        let props_type = import_props.iter().find(|(n, _)| n == &el.name).and_then(|(_, p)| *p);
-        let has_slot = _import_has_slots
-            .iter()
-            .find(|(n, _)| n == &el.name)
-            .map(|(_, h)| *h)
-            .unwrap_or(false);
-
-        let children_expr = if has_slot {
-            if el.children.is_empty() {
-                "div()".to_string()
-            } else {
-                let child_code = generate_children_code(
-                    &el.children,
+        "Slot" => "children".to_string(),
+        _ => {
+            if let Some(render_fn) = imports
+                .iter()
+                .find(|(name, fn_name)| name == &el.name && !fn_name.is_empty())
+                .map(|(_, fn_name)| *fn_name)
+            {
+                gen_import_call(
+                    el,
                     &indent,
-                    depth + 1,
+                    render_fn,
+                    import_props,
+                    prop_fields,
+                    _import_has_slots,
+                    stateful,
+                    imports,
+                    depth,
+                    style_cascade,
+                    style_theme,
+                )
+            } else {
+                gen_fallback(
+                    el,
+                    &indent,
+                    depth,
                     stateful,
                     imports,
                     import_props,
                     prop_fields,
                     _import_has_slots,
-                );
-                clean_inline(&format!("div(){child_code}"))
+                    style_cascade,
+                    style_theme,
+                )
             }
-        } else {
-            String::new()
-        };
+        }
+    };
 
-        return if let Some(pt) = props_type {
-            let mut struct_fields = String::new();
-            if let Some(fields) = prop_fields.and_then(|m| m.get(pt)) {
-                for f in fields {
-                    if let Some((_, attr_val)) = el.attrs.iter().find(|(n, _)| n == &f.name) {
-                        let v = match attr_val {
-                            AttrValue::String(s) => format!("{:?}.into()", s),
-                            AttrValue::Interpolation(expr) => {
-                                format!("{}.into()", interpolation_expr(expr))
-                            }
-                        };
-                        struct_fields.push_str(&format!("\n{indent}        {}: {},", f.name, v));
-                    } else if f.is_optional {
-                        struct_fields.push_str(&format!("\n{indent}        {}: None,", f.name));
-                    }
-                }
-            } else {
-                for (attr_name, attr_val) in &el.attrs {
+    inject_element_styles(&code, el, style_cascade, style_theme).unwrap_or(code)
+}
+
+fn gen_import_call(
+    el: &Element,
+    indent: &str,
+    render_fn: &str,
+    import_props: &[(&str, Option<&str>)],
+    prop_fields: Option<&HashMap<String, Vec<PropField>>>,
+    _import_has_slots: &[(&str, bool)],
+    stateful: bool,
+    imports: &[ResolvedImport],
+    depth: usize,
+    style_cascade: Option<&fncc_styles::Stylesheet>,
+    style_theme: Option<&str>,
+) -> String {
+    let props_type = import_props.iter().find(|(n, _)| n == &el.name).and_then(|(_, p)| *p);
+    let has_slot = _import_has_slots
+        .iter()
+        .find(|(n, _)| n == &el.name)
+        .map(|(_, h)| *h)
+        .unwrap_or(false);
+
+    let children_expr = if has_slot {
+        if el.children.is_empty() {
+            "div()".to_string()
+        } else {
+            let child_code = generate_children_code(
+                &el.children,
+                indent,
+                depth + 1,
+                stateful,
+                imports,
+                import_props,
+                prop_fields,
+                _import_has_slots,
+                style_cascade,
+                style_theme,
+            );
+            clean_inline(&format!("div(){child_code}"))
+        }
+    } else {
+        String::new()
+    };
+
+    if let Some(pt) = props_type {
+        let mut struct_fields = String::new();
+        if let Some(fields) = prop_fields.and_then(|m| m.get(pt)) {
+            for f in fields {
+                if let Some((_, attr_val)) = el.attrs.iter().find(|(n, _)| n == &f.name) {
                     let v = match attr_val {
                         AttrValue::String(s) => format!("{:?}.into()", s),
-                        AttrValue::Interpolation(expr) => {
-                            format!("{}.into()", interpolation_expr(expr))
-                        }
+                        AttrValue::Interpolation(expr) => format!("{}.into()", interpolation_expr(expr)),
                     };
-                    struct_fields.push_str(&format!("\n{indent}        {attr_name}: {v},"));
+                    struct_fields.push_str(&format!("\n{indent}        {}: {},", f.name, v));
+                } else if f.is_optional {
+                    struct_fields.push_str(&format!("\n{indent}        {}: None,", f.name));
                 }
             }
-            if has_slot {
-                format!("{indent}{render_fn}(&{pt} {{ {struct_fields}\n{indent}    }}, {children_expr})")
-            } else {
-                format!("{indent}{render_fn}(&{pt} {{ {struct_fields}\n{indent}    }})")
-            }
-        } else if has_slot {
-            format!("{indent}{render_fn}({children_expr})")
         } else {
-            format!("{indent}{render_fn}()")
-        };
+            for (attr_name, attr_val) in &el.attrs {
+                if attr_name == "class" || attr_name == "style" {
+                    continue;
+                }
+                let v = match attr_val {
+                    AttrValue::String(s) => format!("{:?}.into()", s),
+                    AttrValue::Interpolation(expr) => format!("{}.into()", interpolation_expr(expr)),
+                };
+                struct_fields.push_str(&format!("\n{indent}        {attr_name}: {v},"));
+            }
+        }
+        if has_slot {
+            format!("{indent}{render_fn}(&{pt} {{ {struct_fields}\n{indent}    }}, {children_expr})")
+        } else {
+            format!("{indent}{render_fn}(&{pt} {{ {struct_fields}\n{indent}    }})")
+        }
+    } else if has_slot {
+        format!("{indent}{render_fn}({children_expr})")
+    } else {
+        format!("{indent}{render_fn}()")
+    }
+}
+
+fn inject_element_styles(
+    code: &str,
+    el: &Element,
+    cascade: Option<&fncc_styles::Stylesheet>,
+    theme: Option<&str>,
+) -> Result<String, String> {
+    let cascade = match cascade {
+        Some(c) => c,
+        None => return Ok(code.to_string()),
+    };
+
+    let classes: Vec<String> = el
+        .attrs
+        .iter()
+        .filter(|(name, _)| name == "class")
+        .filter_map(|(_, val)| match val {
+            AttrValue::String(s) => Some(s.split_whitespace().map(|s| s.to_string()).collect::<Vec<_>>()),
+            AttrValue::Interpolation(_) => None,
+        })
+        .flatten()
+        .collect();
+
+    let inline_style = el
+        .attrs
+        .iter()
+        .find(|(name, _)| name == "style")
+        .and_then(|(_, val)| match val {
+            AttrValue::String(s) => Some(s.clone()),
+            AttrValue::Interpolation(_) => None,
+        });
+
+    if classes.is_empty() && inline_style.is_none() {
+        return Ok(code.to_string());
     }
 
-    // Fallback for gpui imports and unknown elements
-    gen_fallback(
-        el,
-        &indent,
-        depth,
-        stateful,
-        imports,
-        import_props,
-        prop_fields,
-        _import_has_slots,
-    )
+    let calls = fncc_styles::resolve(&classes, inline_style.as_deref(), cascade, theme)?;
+
+    if calls.is_empty() {
+        return Ok(code.to_string());
+    }
+
+    // Find indentation from the last non-empty line in the code
+    let indent = code
+        .lines()
+        .rev()
+        .find(|l| !l.trim().is_empty())
+        .map(|l| l.len() - l.trim_start().len())
+        .unwrap_or(4);
+    let indent_str = " ".repeat(indent);
+
+    let style_code: String = calls.iter().map(|c| format!("\n{indent_str}.{}", c.code)).collect();
+
+    // Find first .child( or .children( line and insert before it
+    let mut insert_pos = None;
+    for (i, line) in code.lines().enumerate() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with(".child(") || trimmed.starts_with(".children(") {
+            insert_pos = Some(
+                code.lines()
+                    .take(i)
+                    .map(|l| l.len() + 1)
+                    .sum::<usize>()
+                    .saturating_sub(1),
+            );
+            break;
+        }
+    }
+
+    if let Some(pos) = insert_pos {
+        Ok(format!("{}{}{}", &code[..pos], style_code, &code[pos..]))
+    } else {
+        Ok(format!("{}{}", code.trim_end(), style_code))
+    }
 }
 
 /// Generate code for a `<Fragment>` — wraps children in `div()` using
@@ -533,6 +670,8 @@ fn gen_fragment(
         import_props,
         prop_fields,
         _import_has_slots,
+        None,
+        None,
     );
     format!("{indent}div()\n{children_code}").trim_end().to_string()
 }
@@ -547,6 +686,8 @@ fn generate_children_code(
     import_props: &[(&str, Option<&str>)],
     prop_fields: Option<&HashMap<String, Vec<PropField>>>,
     _import_has_slots: &[(&str, bool)],
+    style_cascade: Option<&fncc_styles::Stylesheet>,
+    style_theme: Option<&str>,
 ) -> String {
     let mut out = String::new();
     let mut i = 0;
@@ -554,14 +695,32 @@ fn generate_children_code(
         match &children[i] {
             Node::Element(el) if el.name == "If" => {
                 let chain = collect_if_chain(children, i);
-                let expr = gen_if_expr(&chain, stateful, imports, import_props, prop_fields, _import_has_slots);
+                let expr = gen_if_expr(
+                    &chain,
+                    stateful,
+                    imports,
+                    import_props,
+                    prop_fields,
+                    _import_has_slots,
+                    style_cascade,
+                    style_theme,
+                );
                 out.push_str(&format!("{indent}    .child(\n"));
                 out.push_str(&format!("{indent}        {expr}\n"));
                 out.push_str(&format!("{indent}    )\n"));
                 i += chain.len();
             }
             Node::Element(el) if el.name == "For" => {
-                let for_code = gen_for_expr(el, stateful, imports, import_props, prop_fields, _import_has_slots);
+                let for_code = gen_for_expr(
+                    el,
+                    stateful,
+                    imports,
+                    import_props,
+                    prop_fields,
+                    _import_has_slots,
+                    style_cascade,
+                    style_theme,
+                );
                 out.push_str(&format!("{indent}    .children(\n"));
                 out.push_str(&format!("{indent}        {for_code}\n"));
                 out.push_str(&format!("{indent}    )\n"));
@@ -577,6 +736,8 @@ fn generate_children_code(
                     import_props,
                     prop_fields,
                     _import_has_slots,
+                    style_cascade,
+                    style_theme,
                 );
                 out.push_str(&frag_code);
                 i += 1;
@@ -593,6 +754,8 @@ fn generate_children_code(
                             import_props,
                             prop_fields,
                             _import_has_slots,
+                            style_cascade,
+                            style_theme,
                         ));
                     }
                     Node::Text(t) => {
@@ -621,6 +784,8 @@ fn gen_stack(
     import_props: &[(&str, Option<&str>)],
     prop_fields: Option<&HashMap<String, Vec<PropField>>>,
     _import_has_slots: &[(&str, bool)],
+    style_cascade: Option<&fncc_styles::Stylesheet>,
+    style_theme: Option<&str>,
 ) -> String {
     let mut out = format!("{indent}div()\n");
 
@@ -653,6 +818,8 @@ fn gen_stack(
         import_props,
         prop_fields,
         _import_has_slots,
+        style_cascade,
+        style_theme,
     ));
 
     out.trim_end().to_string()
@@ -667,6 +834,8 @@ fn gen_text(
     import_props: &[(&str, Option<&str>)],
     prop_fields: Option<&HashMap<String, Vec<PropField>>>,
     _import_has_slots: &[(&str, bool)],
+    style_cascade: Option<&fncc_styles::Stylesheet>,
+    style_theme: Option<&str>,
 ) -> String {
     let mut out = format!("{indent}div()\n");
 
@@ -705,6 +874,8 @@ fn gen_text(
                 import_props,
                 prop_fields,
                 _import_has_slots,
+                style_cascade,
+                style_theme,
             ));
         }
     }
@@ -721,6 +892,8 @@ fn gen_button(
     import_props: &[(&str, Option<&str>)],
     prop_fields: Option<&HashMap<String, Vec<PropField>>>,
     _import_has_slots: &[(&str, bool)],
+    style_cascade: Option<&fncc_styles::Stylesheet>,
+    style_theme: Option<&str>,
 ) -> String {
     let mut out = format!("{indent}div()\n");
 
@@ -767,6 +940,8 @@ fn gen_button(
                 import_props,
                 prop_fields,
                 _import_has_slots,
+                style_cascade,
+                style_theme,
             ));
         }
     }
@@ -783,9 +958,14 @@ fn gen_fallback(
     import_props: &[(&str, Option<&str>)],
     prop_fields: Option<&HashMap<String, Vec<PropField>>>,
     _import_has_slots: &[(&str, bool)],
+    style_cascade: Option<&fncc_styles::Stylesheet>,
+    style_theme: Option<&str>,
 ) -> String {
     let mut out = format!("{indent}div()\n");
     for (key, val) in &el.attrs {
+        if key == "class" || key == "style" {
+            continue;
+        }
         let v = val.as_str();
         out.push_str(&format!("{indent}    .attr({:?}, {:?})\n", key, v));
     }
@@ -798,6 +978,8 @@ fn gen_fallback(
         import_props,
         prop_fields,
         _import_has_slots,
+        style_cascade,
+        style_theme,
     ));
     out.trim_end().to_string()
 }
@@ -872,6 +1054,10 @@ pub(crate) fn to_snake_case(name: &str) -> String {
 mod tests {
     use super::*;
     use crate::parser::parse;
+
+    fn cascade_none() -> Option<fncc_styles::Stylesheet> {
+        None
+    }
 
     fn generate_from(source: &str) -> String {
         let doc = parse(source).unwrap();
@@ -1071,7 +1257,19 @@ mod tests {
     fn test_imported_element_generates_render_call() {
         let doc = parse("<Stack><Header /></Stack>").unwrap();
         let imports: &[(&str, &str)] = &[("Header", "render_header")];
-        let out = generate_with_imports(&doc, 0, imports, None, None, None, &[], None, &[]);
+        let out = generate_with_imports(
+            &doc,
+            0,
+            imports,
+            None,
+            None,
+            None,
+            &[],
+            None,
+            &[],
+            cascade_none().as_ref(),
+            None,
+        );
         assert!(out.contains("render_header()"));
     }
 
@@ -1080,7 +1278,19 @@ mod tests {
         let src = "---\n@state AppState\n---\n<Stack><Footer /></Stack>";
         let doc = parse(src).unwrap();
         let imports: &[(&str, &str)] = &[("Footer", "render_footer")];
-        let out = generate_with_imports(&doc, 0, imports, None, None, None, &[], None, &[]);
+        let out = generate_with_imports(
+            &doc,
+            0,
+            imports,
+            None,
+            None,
+            None,
+            &[],
+            None,
+            &[],
+            cascade_none().as_ref(),
+            None,
+        );
         assert!(out.contains("render_footer()"));
     }
 
@@ -1088,7 +1298,19 @@ mod tests {
     fn test_gpui_import_falls_back_to_div() {
         let doc = parse("<Stack><TextInput /></Stack>").unwrap();
         let imports: &[(&str, &str)] = &[("TextInput", "")];
-        let out = generate_with_imports(&doc, 0, imports, None, None, None, &[], None, &[]);
+        let out = generate_with_imports(
+            &doc,
+            0,
+            imports,
+            None,
+            None,
+            None,
+            &[],
+            None,
+            &[],
+            cascade_none().as_ref(),
+            None,
+        );
         // GPUI imports have empty render fn — fall through to div
         assert!(out.contains("div()"));
     }
@@ -1097,7 +1319,19 @@ mod tests {
     fn test_builtin_takes_precedence_over_import() {
         let doc = parse("<Text>hello</Text>").unwrap();
         let imports: &[(&str, &str)] = &[("Text", "render_text")];
-        let out = generate_with_imports(&doc, 0, imports, None, None, None, &[], None, &[]);
+        let out = generate_with_imports(
+            &doc,
+            0,
+            imports,
+            None,
+            None,
+            None,
+            &[],
+            None,
+            &[],
+            cascade_none().as_ref(),
+            None,
+        );
         // Built-in "Text" handling takes precedence, not render_text()
         assert!(out.contains(".child(\"hello\")"));
     }
@@ -1106,14 +1340,38 @@ mod tests {
     fn test_imported_element_with_custom_component_name() {
         let doc = parse("<Stack><MyHeader /></Stack>").unwrap();
         let imports: &[(&str, &str)] = &[("MyHeader", "render_header")];
-        let out = generate_with_imports(&doc, 0, imports, None, None, None, &[], None, &[]);
+        let out = generate_with_imports(
+            &doc,
+            0,
+            imports,
+            None,
+            None,
+            None,
+            &[],
+            None,
+            &[],
+            cascade_none().as_ref(),
+            None,
+        );
         assert!(out.contains("render_header()"));
     }
 
     #[test]
     fn test_render_fn_name_uses_component_name_arg() {
         let doc = parse("<Text>hello</Text>").unwrap();
-        let out = generate_with_imports(&doc, 0, &[], Some("CustomWidget"), None, None, &[], None, &[]);
+        let out = generate_with_imports(
+            &doc,
+            0,
+            &[],
+            Some("CustomWidget"),
+            None,
+            None,
+            &[],
+            None,
+            &[],
+            cascade_none().as_ref(),
+            None,
+        );
         assert!(out.contains("pub fn render_custom_widget()"));
         // Should NOT use root element name
         assert!(!out.contains("pub fn render_text()"));
@@ -1124,7 +1382,19 @@ mod tests {
     #[test]
     fn test_props_stateless_component_with_props_signature() {
         let doc = parse("<Text>{props.title}</Text>").unwrap();
-        let out = generate_with_imports(&doc, 0, &[], Some("Header"), None, Some("HeaderProps"), &[], None, &[]);
+        let out = generate_with_imports(
+            &doc,
+            0,
+            &[],
+            Some("Header"),
+            None,
+            Some("HeaderProps"),
+            &[],
+            None,
+            &[],
+            cascade_none().as_ref(),
+            None,
+        );
         assert!(out.contains("pub fn render_header(props: &HeaderProps) -> impl IntoElement {"));
         assert!(out.contains("props.title"));
     }
@@ -1134,7 +1404,19 @@ mod tests {
         let doc = parse("<Header title=\"Welcome\" />").unwrap();
         let imports: &[(&str, &str)] = &[("Header", "render_header")];
         let import_props: &[(&str, Option<&str>)] = &[("Header", Some("HeaderProps"))];
-        let out = generate_with_imports(&doc, 0, imports, None, None, None, import_props, None, &[]);
+        let out = generate_with_imports(
+            &doc,
+            0,
+            imports,
+            None,
+            None,
+            None,
+            import_props,
+            None,
+            &[],
+            cascade_none().as_ref(),
+            None,
+        );
         assert!(out.contains("render_header(&HeaderProps {"));
         assert!(out.contains("title: \"Welcome\".into(),"));
         assert!(out.contains("})"));
@@ -1145,7 +1427,19 @@ mod tests {
         let doc = parse("<Header title=\"Hi\" subtitle=\"World\" />").unwrap();
         let imports: &[(&str, &str)] = &[("Header", "render_header")];
         let import_props: &[(&str, Option<&str>)] = &[("Header", Some("HeaderProps"))];
-        let out = generate_with_imports(&doc, 0, imports, None, None, None, import_props, None, &[]);
+        let out = generate_with_imports(
+            &doc,
+            0,
+            imports,
+            None,
+            None,
+            None,
+            import_props,
+            None,
+            &[],
+            cascade_none().as_ref(),
+            None,
+        );
         assert!(out.contains("title: \"Hi\".into(),"));
         assert!(out.contains("subtitle: \"World\".into(),"));
     }
@@ -1155,7 +1449,19 @@ mod tests {
         let doc = parse("<Header title=\"Hi\" />").unwrap();
         let imports: &[(&str, &str)] = &[("Header", "render_header")];
         let import_props: &[(&str, Option<&str>)] = &[("Header", Some("HeaderProps"))];
-        let out = generate_with_imports(&doc, 0, imports, None, None, None, import_props, None, &[]);
+        let out = generate_with_imports(
+            &doc,
+            0,
+            imports,
+            None,
+            None,
+            None,
+            import_props,
+            None,
+            &[],
+            cascade_none().as_ref(),
+            None,
+        );
         // Option<T> fields are transparent at codegen — .into() handles conversion
         assert!(out.contains("title: \"Hi\".into(),"));
     }
@@ -1165,7 +1471,19 @@ mod tests {
         let doc = parse("<Stack><Header title=\"Nested\" /><Text>ok</Text></Stack>").unwrap();
         let imports: &[(&str, &str)] = &[("Header", "render_header")];
         let import_props: &[(&str, Option<&str>)] = &[("Header", Some("HeaderProps"))];
-        let out = generate_with_imports(&doc, 0, imports, None, None, None, import_props, None, &[]);
+        let out = generate_with_imports(
+            &doc,
+            0,
+            imports,
+            None,
+            None,
+            None,
+            import_props,
+            None,
+            &[],
+            cascade_none().as_ref(),
+            None,
+        );
         assert!(out.contains("render_header(&HeaderProps {"));
         assert!(out.contains("title: \"Nested\".into(),"));
     }
@@ -1175,7 +1493,19 @@ mod tests {
         let doc = parse("<Stack><Header title=\"A\" /><Footer /></Stack>").unwrap();
         let imports: &[(&str, &str)] = &[("Header", "render_header"), ("Footer", "render_footer")];
         let import_props: &[(&str, Option<&str>)] = &[("Header", Some("HeaderProps")), ("Footer", None)];
-        let out = generate_with_imports(&doc, 0, imports, None, None, None, import_props, None, &[]);
+        let out = generate_with_imports(
+            &doc,
+            0,
+            imports,
+            None,
+            None,
+            None,
+            import_props,
+            None,
+            &[],
+            cascade_none().as_ref(),
+            None,
+        );
         assert!(out.contains("render_header(&HeaderProps {"));
         assert!(out.contains("title: \"A\".into(),"));
         assert!(out.contains("render_footer()"));
@@ -1186,7 +1516,19 @@ mod tests {
         let doc = parse("<Footer />").unwrap();
         let imports: &[(&str, &str)] = &[("Footer", "render_footer")];
         let import_props: &[(&str, Option<&str>)] = &[("Footer", None)];
-        let out = generate_with_imports(&doc, 0, imports, None, None, None, import_props, None, &[]);
+        let out = generate_with_imports(
+            &doc,
+            0,
+            imports,
+            None,
+            None,
+            None,
+            import_props,
+            None,
+            &[],
+            cascade_none().as_ref(),
+            None,
+        );
         assert!(out.contains("render_footer()"));
         assert!(!out.contains("&"));
     }
@@ -1196,7 +1538,19 @@ mod tests {
         let doc = parse("<Header title=\"SelfClose\" subtitle=\"X\" />").unwrap();
         let imports: &[(&str, &str)] = &[("Header", "render_header")];
         let import_props: &[(&str, Option<&str>)] = &[("Header", Some("HeaderProps"))];
-        let out = generate_with_imports(&doc, 0, imports, None, None, None, import_props, None, &[]);
+        let out = generate_with_imports(
+            &doc,
+            0,
+            imports,
+            None,
+            None,
+            None,
+            import_props,
+            None,
+            &[],
+            cascade_none().as_ref(),
+            None,
+        );
         assert!(out.contains("title: \"SelfClose\".into(),"));
         assert!(out.contains("subtitle: \"X\".into(),"));
     }
@@ -1253,7 +1607,19 @@ mod tests {
     #[test]
     fn test_slot_in_stateless_component() {
         let doc = parse("<Stack><Slot /></Stack>").unwrap();
-        let out = generate_with_imports(&doc, 0, &[], Some("Card"), None, None, &[], None, &[]);
+        let out = generate_with_imports(
+            &doc,
+            0,
+            &[],
+            Some("Card"),
+            None,
+            None,
+            &[],
+            None,
+            &[],
+            cascade_none().as_ref(),
+            None,
+        );
         assert!(out.contains("children: impl IntoElement"));
         assert!(out.contains("children"));
     }
@@ -1281,5 +1647,55 @@ mod tests {
         assert!(out.contains("div()"));
         assert!(out.contains(".child(\"A\")"));
         assert!(out.contains(".child(\"B\")"));
+    }
+
+    // --- Style injection tests ---
+
+    #[test]
+    fn test_style_class_injects_method_calls() {
+        let doc = parse("<Text class=\"heading\">Title</Text>").unwrap();
+        let mut ss = fncc_styles::Stylesheet::default();
+        ss.rules.insert(
+            "heading".into(),
+            vec![("color".into(), "red".into()), ("font-size".into(), "24px".into())],
+        );
+        let out = generate_with_imports(&doc, 0, &[], None, None, None, &[], None, &[], Some(&ss), None);
+        assert!(
+            out.contains(".text_color(rgba(0xff0000ff))"),
+            "missing text_color: {out}"
+        );
+        assert!(out.contains(".text_2xl()"), "missing text_2xl: {out}");
+    }
+
+    #[test]
+    fn test_style_inline_injects_method_calls() {
+        let doc = parse("<Text style=\"color: blue; padding: 8px\">Hi</Text>").unwrap();
+        let ss = fncc_styles::Stylesheet::default();
+        let out = generate_with_imports(&doc, 0, &[], None, None, None, &[], None, &[], Some(&ss), None);
+        assert!(out.contains(".text_color(rgba(0x0000ffff))"));
+        assert!(out.contains(".p(px(8.))"));
+    }
+
+    #[test]
+    fn test_style_class_unknown_skipped() {
+        let doc = parse("<Text class=\"nonexistent\">Hi</Text>").unwrap();
+        let ss = fncc_styles::Stylesheet::default();
+        let out = generate_with_imports(&doc, 0, &[], None, None, None, &[], None, &[], Some(&ss), None);
+        // Unknown class should be silently ignored
+        assert!(out.contains(".child(\"Hi\")"));
+    }
+
+    #[test]
+    fn test_style_class_and_inline_merged() {
+        let doc = parse("<Button class=\"big\" style=\"color: white\">Go</Button>").unwrap();
+        let mut ss = fncc_styles::Stylesheet::default();
+        ss.rules.insert(
+            "big".into(),
+            vec![("padding".into(), "16px".into()), ("font-size".into(), "20px".into())],
+        );
+        let out = generate_with_imports(&doc, 0, &[], None, None, None, &[], None, &[], Some(&ss), None);
+        assert!(out.contains(".p(px(16.))"));
+        assert!(out.contains(".text_xl()"));
+        assert!(out.contains(".text_color(rgba(0xffffffff))"));
     }
 }

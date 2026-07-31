@@ -1,0 +1,11 @@
+[package]
+name = "fncc-styles-app"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[dependencies]
+fncc = { path = "../../crates/fncc" }
+
+[build-dependencies]
+fncc-core = { path = "../../crates/fncc-core" }

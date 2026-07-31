@@ -3,12 +3,14 @@ members = [
     "crates/fncc-core",
     "crates/fncc-macros",
     "crates/fncc-runtime",
+    "crates/fncc-styles",
     "crates/fncc",
     "apps/example-app",
     "apps/components-app",
     "apps/semantic-app",
     "apps/props-app",
     "apps/flow-app",
+    "apps/styles-app",
     "xtask",
 ]
 resolver = "3"

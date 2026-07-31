@@ -1,6 +1,9 @@
-document = { SOI ~ frontmatter? ~ WS* ~ element ~ WS* ~ EOI }
+document = { SOI ~ frontmatter? ~ WS* ~ styles_block? ~ WS* ~ element ~ WS* ~ EOI }
 
 frontmatter = { "---" ~ (!("---") ~ ANY)* ~ "---" ~ WS? }
+
+styles_block = { styles_open_tag ~ (!("</Styles>") ~ ANY)* ~ "</Styles>" ~ WS? }
+styles_open_tag = { "<Styles>" }
 
 element = {
     open_tag ~ children? ~ close_tag

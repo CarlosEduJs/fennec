@@ -7,10 +7,10 @@ pub use parser::parse;
 
 use anyhow::{Context, Result};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Recursively collect all .fui files under `dir`.
-fn collect_fui_files(dir: &Path) -> Result<Vec<std::path::PathBuf>> {
+fn collect_fui_files(dir: &Path) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
     if !dir.is_dir() {
         return Ok(files);
@@ -25,6 +25,75 @@ fn collect_fui_files(dir: &Path) -> Result<Vec<std::path::PathBuf>> {
         }
     }
     Ok(files)
+}
+
+/// Collect all .fncss files under `dir`, returning map from parent dir to parsed stylesheet.
+fn collect_fncss_files(dir: &Path) -> Result<HashMap<PathBuf, fncc_styles::Stylesheet>> {
+    let mut sheets = HashMap::new();
+    collect_fncss_recursive(dir, &mut sheets)?;
+    Ok(sheets)
+}
+
+fn collect_fncss_recursive(current: &Path, sheets: &mut HashMap<PathBuf, fncc_styles::Stylesheet>) -> Result<()> {
+    for entry in std::fs::read_dir(current).context("failed to read dir")? {
+        let entry = entry.context("failed to read entry")?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_fncss_recursive(&path, sheets)?;
+        } else if path.extension().is_some_and(|ext| ext == "fncss") {
+            let content = std::fs::read_to_string(&path).with_context(|| format!("failed to read {:?}", path))?;
+            match fncc_styles::css_parser::parse(&content) {
+                Ok(ss) => {
+                    let parent = path.parent().unwrap_or(current).to_path_buf();
+                    sheets.insert(parent, ss);
+                }
+                Err(e) => anyhow::bail!("failed to parse {:?}: {e}", path),
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Build the style cascade for a .fui file at `fui_path` relative to `ui_dir`.
+/// Merges from least specific to most specific: root → parent dirs → same dir → inline <Styles>.
+fn build_cascade(
+    fui_path: &Path,
+    ui_dir: &Path,
+    fncss_sheets: &HashMap<PathBuf, fncc_styles::Stylesheet>,
+    inline_styles: Option<&str>,
+) -> Result<fncc_styles::Stylesheet> {
+    let mut cascade = Vec::new();
+
+    let fui_dir = fui_path.parent().unwrap_or(Path::new(""));
+
+    // Collect .fncss from root to the .fui's directory
+    let mut ancestors: Vec<PathBuf> = Vec::new();
+    let mut current = Some(fui_dir.to_path_buf());
+    while let Some(dir) = current {
+        if dir == ui_dir || dir.starts_with(ui_dir) || ui_dir.starts_with(&dir) {
+            ancestors.push(dir.clone());
+        }
+        if dir == ui_dir {
+            break;
+        }
+        current = dir.parent().map(|p| p.to_path_buf());
+    }
+    ancestors.reverse();
+
+    for dir in &ancestors {
+        if let Some(ss) = fncss_sheets.get(dir) {
+            cascade.push(ss.clone());
+        }
+    }
+
+    // Parse inline <Styles> and merge on top
+    if let Some(styles_text) = inline_styles {
+        let inline_ss = fncc_styles::css_parser::parse(styles_text)
+            .map_err(|e| anyhow::anyhow!("failed to parse <Styles> block: {e}"))?;
+        cascade.push(inline_ss);
+    }
+
+    Ok(fncc_styles::merge(cascade))
 }
 
 /// Structured parsed file for two-pass processing.
@@ -69,6 +138,9 @@ pub fn generate_all_with_options(opts: GenerateOptions) -> Result<()> {
     let ui_dir = opts.ui_dir;
     let out_file = opts.out_file;
     let files = collect_fui_files(ui_dir)?;
+
+    // Collect and parse .fncss files
+    let fncss_sheets = collect_fncss_files(ui_dir)?;
 
     // Pass 1: Parse all files
     let mut parsed_files: Vec<ParsedFile> = Vec::new();
@@ -303,6 +375,9 @@ pub fn generate_all_with_options(opts: GenerateOptions) -> Result<()> {
             .collect();
 
         let prop_fields = semantic_db.as_ref().map(|db| &db.props_types);
+        let style_cascade = build_cascade(&pf.path, ui_dir, &fncss_sheets, pf.ast.styles.as_deref())
+            .map_err(|e| anyhow::anyhow!("in '{}': {e}", pf.path.display()))?;
+        let style_theme = pf.ast.theme.as_deref();
         let generated = codegen::generate_with_imports(
             &pf.ast,
             file_id,
@@ -313,6 +388,8 @@ pub fn generate_all_with_options(opts: GenerateOptions) -> Result<()> {
             &import_props,
             prop_fields,
             &import_has_slots,
+            Some(&style_cascade),
+            style_theme,
         );
         output.push_str(&generated);
         output.push('\n');

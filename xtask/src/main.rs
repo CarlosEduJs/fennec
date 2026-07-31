@@ -684,7 +684,7 @@ fn run_publish(root: &Path, dry_run: bool, execute: bool) -> Result<()> {
     let available_crates = get_workspace_crates(root)?;
 
     // Define publication order based on dependency graph
-    let order = ["fncc-macros", "fncc-core", "fncc-runtime", "fncc"];
+    let order = ["fncc-macros", "fncc-core", "fncc-runtime", "fncc-styles", "fncc"];
 
     println!("Order of publication & releases:");
 

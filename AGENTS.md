@@ -7,11 +7,13 @@ Rust workspace (ed2024, resolver 3) — a compiler/framework that translates Ast
 | Crate | Role |
 |---|---|
 | `fncc-macros` | `#[fncc::command]` proc-macro (must publish first) |
+| `fncc-styles` | CSS-like style compiler (token/theme resolution, GPUI mapping) |
 | `fncc-core` | Pest parser + codegen (build-dependency for apps) |
 | `fncc-runtime` | Re-exports `gpui` + convenience wrappers |
 | `fncc` | Umbrella crate re-exporting macros+runtime |
 | `xtask` | Release tooling (not published) |
 | `fncc-example` | Example app (not published) |
+| `fncc-styles-app` | Styles demo app — tokens, themes, `.fncss` cascade, `<Styles>` inline blocks (not published) |
 
 ## Developer commands (run from workspace root)
 
@@ -34,7 +36,7 @@ Agents working on this repository MUST consult and follow the workflows in `.age
 
 - `/develop`: End-to-end workflow for implementing features, fixes, or refactors.
 - `/validate`: Local validation pipeline matching CI order (`taplo` → `fmt` → `clippy` → `tests`).
-- `/create-changeset`: Generate version bump declarations for published crates (`fncc`, `fncc-core`, `fncc-macros`, `fncc-runtime`).
+- `/create-changeset`: Generate version bump declarations for published crates (`fncc`, `fncc-core`, `fncc-styles`, `fncc-macros`, `fncc-runtime`).
 - `/review-changes`: Quick audit of uncommitted/staged changes before finalizing tasks.
 - `/review-pr`: Comprehensive code review for pull requests.
 - `/use-skills`: Guidance on discovering and applying project skills (`coding-guidelines`, `rust-best-practices`, `rust-pragmatic`, `rust-review`).
@@ -52,6 +54,17 @@ sudo apt-get install libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev
 3. `.fui` files live in `src/ui/` by default
 4. Frontmatter uses `@state TypeName` to declare state; imports go in frontmatter too
 5. Codegen generates `impl Render for TypeName` (stateful) or `pub fn render_xxx()` (stateless)
+
+## How styles work
+
+1. Styles can be defined inline in `<Styles>` blocks in `.fui` files or in standalone `.fncss` files
+2. `.fncss` files are discovered by directory — each dir's styles cascade over its parent's
+3. Cascade order (most specific wins): inline `<Styles>` > same dir `.fncss` > parent dir `.fncss` > root `.fncss`
+4. Tokens are declared as `$name: value;` inside `:root { }` blocks (and `theme name { $token: value; }` for themes)
+5. Themes activated via `@theme name` in frontmatter or global config
+6. Token/theme resolution is compile-time only
+7. Unknown CSS properties → hard build error; unknown classes → silently skipped
+8. Mapped GPUI subset: padding/margin/gap, flex/grid, size/min/max, background/color/border/radius/shadow, typography, overflow, position, cursor
 
 ## #[fncc::command] levels
 
