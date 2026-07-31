@@ -1,8 +1,8 @@
 [package]
-name = "fncc-styles-app"
-version = "0.0.0"
-publish = false
 edition = "2024"
+name = "fncc-styles-app"
+publish = false
+version = "0.0.0"
 
 [dependencies]
 fncc = { path = "../../crates/fncc" }
