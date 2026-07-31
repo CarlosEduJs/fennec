@@ -1,6 +1,8 @@
 # Changelog - fncc-styles
 
-All notable changes to `fncc-styles` crate will be documented in this file.## [0.1.0] - 2026-07-31
+All notable changes to `fncc-styles` crate will be documented in this file.
+
+## [0.1.0] - 2026-07-31
 
 ### Initial release
 
