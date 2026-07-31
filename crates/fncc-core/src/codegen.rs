@@ -35,6 +35,36 @@ pub fn generate_with_imports(
     style_cascade: Option<&fncc_styles::Stylesheet>,
     style_theme: Option<&str>,
 ) -> String {
+    generate_with_imports_and_route_params(
+        doc,
+        file_id,
+        imports,
+        component_name,
+        resolved_state_type,
+        props_type,
+        import_props,
+        prop_fields,
+        import_has_slots,
+        style_cascade,
+        style_theme,
+        &[],
+    )
+}
+
+pub fn generate_with_imports_and_route_params(
+    doc: &Document,
+    file_id: usize,
+    imports: &[ResolvedImport],
+    component_name: Option<&str>,
+    resolved_state_type: Option<&str>,
+    props_type: Option<&str>,
+    import_props: &[(&str, Option<&str>)],
+    prop_fields: Option<&HashMap<String, Vec<PropField>>>,
+    import_has_slots: &[(&str, bool)],
+    style_cascade: Option<&fncc_styles::Stylesheet>,
+    style_theme: Option<&str>,
+    route_params: &[String],
+) -> String {
     let mut out = String::new();
     let state_type = resolved_state_type.or(doc.state_type.as_deref());
     let has_state = state_type.is_some();
@@ -81,6 +111,7 @@ pub fn generate_with_imports(
             has_slot,
             style_cascade,
             style_theme,
+            route_params,
         );
     }
 
@@ -99,16 +130,22 @@ fn generate_stateless(
     has_slot: bool,
     style_cascade: Option<&fncc_styles::Stylesheet>,
     style_theme: Option<&str>,
+    route_params: &[String],
 ) {
     let name = component_name.unwrap_or(&doc.root.name);
     let fn_name = format!("render_{}", to_snake_case(name));
 
-    let params = match (props_type, has_slot) {
-        (Some(pt), true) => format!("props: &{pt}, children: impl IntoElement"),
-        (Some(pt), false) => format!("props: &{pt}"),
-        (None, true) => "children: impl IntoElement".to_string(),
-        (None, false) => String::new(),
-    };
+    let mut param_parts = Vec::new();
+    for p in route_params {
+        param_parts.push(format!("{p}: &str"));
+    }
+    if let Some(pt) = props_type {
+        param_parts.push(format!("props: &{pt}"));
+    }
+    if has_slot {
+        param_parts.push("children: impl IntoElement".to_string());
+    }
+    let params = param_parts.join(", ");
 
     let sig = if params.is_empty() {
         format!("pub fn {fn_name}() -> impl IntoElement {{\n")

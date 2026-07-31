@@ -519,7 +519,13 @@ pub fn generate_all_with_options(opts: GenerateOptions) -> Result<()> {
                 pf.path.display(),
             );
         }
-        let generated = codegen::generate_with_imports(
+        let route_params = route_tree
+            .as_ref()
+            .and_then(|tree| tree.routes.iter().find(|r| r.file_path == pf.path))
+            .map(|r| r.params.as_slice())
+            .unwrap_or(&[]);
+
+        let generated = codegen::generate_with_imports_and_route_params(
             &pf.ast,
             file_id,
             &resolved,
@@ -531,6 +537,7 @@ pub fn generate_all_with_options(opts: GenerateOptions) -> Result<()> {
             &import_has_slots,
             Some(&style_cascade),
             style_theme,
+            route_params,
         );
         output.push_str(&generated);
         output.push('\n');
@@ -1477,6 +1484,62 @@ mod tests {
 
         let content = std::fs::read_to_string(&out_file).unwrap();
         assert!(!content.contains("fncc_load_fonts"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_nfbr_full_end_to_end() {
+        let (dir, ui_dir) = test_dir();
+        let routes_dir = ui_dir.join("routes");
+        std::fs::create_dir_all(&routes_dir).unwrap();
+
+        // Top level layout.fui with RouterOutlet
+        std::fs::write(
+            routes_dir.join("layout.fui"),
+            "<Stack><Text>Root Layout Header</Text><RouterOutlet /></Stack>",
+        )
+        .unwrap();
+
+        // Index route
+        std::fs::write(routes_dir.join("index.fui"), "<Text>Home Screen</Text>").unwrap();
+
+        // Nested dashboard layout and screen
+        let dash_dir = routes_dir.join("dashboard");
+        std::fs::create_dir_all(&dash_dir).unwrap();
+        std::fs::write(
+            dash_dir.join("layout.fui"),
+            "<Stack><Text>Dashboard Sidebar</Text><RouterOutlet /></Stack>",
+        )
+        .unwrap();
+        std::fs::write(dash_dir.join("index.fui"), "<Text>Dashboard Main</Text>").unwrap();
+
+        // Dynamic parameter route: users/[id].fui
+        let users_dir = routes_dir.join("users");
+        std::fs::create_dir_all(&users_dir).unwrap();
+        std::fs::write(users_dir.join("[id].fui"), "<Text>{id}</Text>").unwrap();
+
+        let out_file = dir.join("generated.rs");
+        generate_all(&ui_dir, &out_file).unwrap();
+
+        let code = std::fs::read_to_string(&out_file).unwrap();
+
+        // Layout functions accept children: impl IntoElement
+        assert!(code.contains("pub fn render_layout(children: impl IntoElement) -> impl IntoElement"));
+        assert!(code.contains("pub fn render_dashboard_layout(children: impl IntoElement) -> impl IntoElement"));
+
+        // Dynamic parameter screen accepts id: &str
+        assert!(code.contains("pub fn render_users_id(id: &str) -> impl IntoElement"));
+
+        // Generated Route enum
+        assert!(code.contains("pub enum Route {"));
+        assert!(code.contains("Index,"));
+        assert!(code.contains("Dashboard,"));
+        assert!(code.contains("UsersId {"));
+
+        // Route::render cascades nested layouts
+        assert!(code.contains("Route::Dashboard => render_layout(render_dashboard_layout(render_dashboard()))"));
+        assert!(code.contains("Route::UsersId { id } => render_layout(render_users_id(&id))"));
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
