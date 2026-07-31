@@ -1,0 +1,72 @@
+---
+@state AppState
+---
+
+<Styles>
+:root {
+  $bg-main: #09090b;
+  $bg-card: #18181b;
+  $border-color: #27272a;
+  $text-primary: #f4f4f5;
+  $text-muted: #a1a1aa;
+}
+
+.app-container {
+  display: flex;
+  flex-direction: column;
+  background: $bg-main;
+  padding: 16px;
+  gap: 16px;
+  w: 100%;
+  h: 100%;
+}
+
+.header-bar {
+  display: flex;
+  background: $bg-card;
+  padding: 12px;
+  align-items: center;
+  justify-content: space-between;
+  border-radius: 6px;
+}
+
+.nav-links {
+  display: flex;
+  gap: 8px;
+}
+
+.nav-btn {
+  background: #27272a;
+  color: $text-primary;
+  padding: 2px;
+  pl: 6px;
+  pr: 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.outlet-container {
+  display: flex;
+  flex-direction: column;
+  background: $bg-card;
+  padding: 20px;
+  border-radius: 6px;
+}
+</Styles>
+
+<Stack class="app-container">
+    <Stack class="header-bar">
+        <Text class="nav-btn">Router</Text>
+        <Stack class="nav-links">
+            <Button onclick="nav_home" class="nav-btn">Home</Button>
+            <Button onclick="nav_settings" class="nav-btn">Settings</Button>
+            <Button onclick="nav_analytics" class="nav-btn">Analytics</Button>
+            <Button onclick="nav_user_alice" class="nav-btn">User: Alice</Button>
+            <Button onclick="nav_back" class="nav-btn">Back</Button>
+        </Stack>
+    </Stack>
+    <Stack class="outlet-container">
+        {state.router.current().render()}
+    </Stack>
+</Stack>

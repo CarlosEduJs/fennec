@@ -306,7 +306,7 @@ fn parse_fui_imports(path: &str) -> Option<Vec<ComponentImport>> {
 
 /// Check if an element tree contains a `<Slot>` element.
 pub fn has_slot(el: &Element) -> bool {
-    if el.name == "Slot" {
+    if el.name == "Slot" || el.name == "RouterOutlet" {
         return true;
     }
     for child in &el.children {

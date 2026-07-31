@@ -1,0 +1,20 @@
+<Styles>
+.dashboard-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: #09090b;
+  padding: 12px;
+  border-radius: 4px;
+}
+
+.dash-badge {
+  color: #a1a1aa;
+  font-size: 13px;
+}
+</Styles>
+
+<Stack class="dashboard-layout">
+    <Text class="dash-badge">Layout: (dashboard)</Text>
+    <RouterOutlet />
+</Stack>

@@ -1,9 +1,11 @@
 pub mod codegen;
 pub mod config;
 pub mod parser;
+pub mod router;
 pub mod semantic;
 
 pub use parser::parse;
+pub use router::{RouteInfo, RouteTree};
 
 use anyhow::{Context, Result};
 use std::collections::HashMap;
@@ -246,12 +248,57 @@ pub fn generate_all_with_options(opts: GenerateOptions) -> Result<()> {
         });
     }
 
+    // Check for routes directory upfront
+    let routes_dir = if ui_dir.file_name() == Some(std::ffi::OsStr::new("routes")) {
+        Some(ui_dir.to_path_buf())
+    } else if ui_dir.join("routes").is_dir() {
+        Some(ui_dir.join("routes"))
+    } else {
+        None
+    };
+
+    let route_tree = if let Some(ref r_dir) = routes_dir {
+        Some(RouteTree::scan(r_dir)?)
+    } else {
+        None
+    };
+
+    // Helper to resolve unique render function name for any component (route or standard)
+    let resolve_render_fn = |pf: &ParsedFile| -> String {
+        if let (Some(r_dir), Some(tree)) = (routes_dir.as_ref(), route_tree.as_ref())
+            && let Ok(rel) = pf.path.strip_prefix(r_dir)
+        {
+            if rel.file_name() == Some(std::ffi::OsStr::new("layout.fui")) {
+                let parent = rel.parent().unwrap_or_else(|| Path::new(""));
+                let parent_str = parent.to_string_lossy();
+                if parent_str.is_empty() {
+                    return "render_layout".to_string();
+                } else {
+                    let pascal = router::to_pascal_case(&parent_str.replace('/', "_"));
+                    return format!("render_{}_layout", codegen::to_snake_case(&pascal));
+                }
+            }
+
+            if let Some(route) = tree.routes.iter().find(|r| r.file_path == pf.path) {
+                return format!("render_{}", codegen::to_snake_case(&route.variant_name));
+            }
+
+            if let Some(ref fb) = tree.fallback
+                && fb.file_path == pf.path
+            {
+                return "render_fallback".to_string();
+            }
+        }
+
+        let component_name = pf.relative_stem.split('/').next_back().unwrap_or("");
+        format!("render_{}", codegen::to_snake_case(component_name))
+    };
+
     // Build import resolution index: "ui::path::Component" -> render function name
     let mut import_index: HashMap<String, String> = HashMap::new();
     for pf in &parsed_files {
         let ui_path = format!("ui::{}", pf.relative_stem.replace('/', "::"));
-        let component_name = pf.relative_stem.split('/').next_back().unwrap_or("");
-        let render_fn = format!("render_{}", codegen::to_snake_case(component_name));
+        let render_fn = resolve_render_fn(pf);
         import_index.insert(ui_path, render_fn);
     }
 
@@ -259,8 +306,7 @@ pub fn generate_all_with_options(opts: GenerateOptions) -> Result<()> {
     // Only set when the component's template actually uses {props.xxx} interpolation.
     let mut render_fn_to_props: HashMap<String, Option<String>> = HashMap::new();
     for pf in &parsed_files {
-        let component_name = pf.relative_stem.split('/').next_back().unwrap_or("");
-        let render_fn = format!("render_{}", codegen::to_snake_case(component_name));
+        let render_fn = resolve_render_fn(pf);
         let props_type = parser::uses_props_interpolation(&pf.ast.root)
             .then(|| {
                 pf.ast.imports.iter().find_map(|imp| {
@@ -278,8 +324,7 @@ pub fn generate_all_with_options(opts: GenerateOptions) -> Result<()> {
     // Build slot index: render_fn_name -> has_slot
     let mut render_fn_to_slot: HashMap<String, bool> = HashMap::new();
     for pf in &parsed_files {
-        let component_name = pf.relative_stem.split('/').next_back().unwrap_or("");
-        let render_fn = format!("render_{}", codegen::to_snake_case(component_name));
+        let render_fn = resolve_render_fn(pf);
         let has_slot = parser::has_slot(&pf.ast.root);
         render_fn_to_slot.insert(render_fn, has_slot);
     }
@@ -423,7 +468,9 @@ pub fn generate_all_with_options(opts: GenerateOptions) -> Result<()> {
             validate_props_usage(&pf.path, &pf.ast.root, &import_props, &db.props_types)?;
         }
 
-        let component_name = pf.relative_stem.split('/').next_back();
+        let render_fn = resolve_render_fn(pf);
+        let comp_name = render_fn.strip_prefix("render_").unwrap_or(&render_fn);
+        let component_name = Some(comp_name);
         let resolved_state = state_types.get(&file_id).and_then(|s| s.as_deref());
 
         // Stateful components cannot receive props
@@ -472,7 +519,24 @@ pub fn generate_all_with_options(opts: GenerateOptions) -> Result<()> {
                 pf.path.display(),
             );
         }
-        let generated = codegen::generate_with_imports(
+        let route_params = route_tree
+            .as_ref()
+            .and_then(|tree| tree.routes.iter().find(|r| r.file_path == pf.path))
+            .map(|r| r.params.as_slice())
+            .unwrap_or(&[]);
+
+        if let Some(state_ty) = resolved_state
+            && !route_params.is_empty()
+        {
+            anyhow::bail!(
+                "in '{}': dynamic route screens must be stateless in v0.1 (found state type '{}' on route with params {:?})",
+                pf.path.display(),
+                state_ty,
+                route_params
+            );
+        }
+
+        let generated = codegen::generate_with_imports_and_route_params(
             &pf.ast,
             file_id,
             &resolved,
@@ -484,9 +548,18 @@ pub fn generate_all_with_options(opts: GenerateOptions) -> Result<()> {
             &import_has_slots,
             Some(&style_cascade),
             style_theme,
+            route_params,
         );
         output.push_str(&generated);
         output.push('\n');
+    }
+
+    // Generate Native File-Based Routing (NFBR) code if routes directory is present
+    if let Some(ref tree) = route_tree
+        && (!tree.routes.is_empty() || tree.fallback.is_some())
+    {
+        let router_code = router::generate_router_code(tree);
+        output.push_str(&router_code);
     }
 
     std::fs::write(out_file, &output).context("failed to write generated file")?;
@@ -1413,6 +1486,66 @@ mod tests {
 
         let content = std::fs::read_to_string(&out_file).unwrap();
         assert!(!content.contains("fncc_load_fonts"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_nfbr_full_end_to_end() {
+        let (dir, ui_dir) = test_dir();
+        let routes_dir = ui_dir.join("routes");
+        std::fs::create_dir_all(&routes_dir).unwrap();
+
+        // Top level layout.fui with RouterOutlet
+        std::fs::write(
+            routes_dir.join("layout.fui"),
+            "<Stack><Text>Root Layout Header</Text><RouterOutlet /></Stack>",
+        )
+        .unwrap();
+
+        // Index route
+        std::fs::write(routes_dir.join("index.fui"), "<Text>Home Screen</Text>").unwrap();
+
+        // Nested dashboard layout and screen
+        let dash_dir = routes_dir.join("dashboard");
+        std::fs::create_dir_all(&dash_dir).unwrap();
+        std::fs::write(
+            dash_dir.join("layout.fui"),
+            "<Stack><Text>Dashboard Sidebar</Text><RouterOutlet /></Stack>",
+        )
+        .unwrap();
+        std::fs::write(dash_dir.join("index.fui"), "<Text>Dashboard Main</Text>").unwrap();
+
+        // Dynamic parameter route: users/[id].fui
+        let users_dir = routes_dir.join("users");
+        std::fs::create_dir_all(&users_dir).unwrap();
+        std::fs::write(users_dir.join("[id].fui"), "<Text>{id}</Text>").unwrap();
+
+        let out_file = dir.join("generated.rs");
+        generate_all(&ui_dir, &out_file).unwrap();
+
+        let code = std::fs::read_to_string(&out_file).unwrap();
+
+        // Layout functions accept children: impl IntoElement
+        assert!(code.contains("pub fn render_layout(children: impl IntoElement) -> impl IntoElement"));
+        assert!(code.contains("pub fn render_dashboard_layout(children: impl IntoElement) -> impl IntoElement"));
+
+        // Dynamic parameter screen accepts id: &str
+        assert!(code.contains("pub fn render_users_id(id: &str) -> impl IntoElement"));
+
+        // Generated Route enum
+        assert!(code.contains("pub enum Route {"));
+        assert!(code.contains("Index,"));
+        assert!(code.contains("Dashboard,"));
+        assert!(code.contains("UsersId {"));
+
+        // Route::render cascades nested layouts
+        assert!(code.contains(
+            "Route::Dashboard => render_layout(render_dashboard_layout(render_dashboard())).into_any_element()"
+        ));
+        assert!(
+            code.contains("Route::UsersId { id } => render_layout(render_users_id(id.as_str())).into_any_element()")
+        );
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

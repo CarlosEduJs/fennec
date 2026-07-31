@@ -1850,6 +1850,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "fncc-router-app"
+version = "0.0.0"
+dependencies = [
+ "fncc",
+ "fncc-core",
+]
+
+[[package]]
 name = "fncc-runtime"
 version = "0.1.0"
 dependencies = [

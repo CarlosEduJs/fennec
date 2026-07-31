@@ -35,6 +35,62 @@ pub fn generate_with_imports(
     style_cascade: Option<&fncc_styles::Stylesheet>,
     style_theme: Option<&str>,
 ) -> String {
+    generate_with_imports_and_route_params(
+        doc,
+        file_id,
+        imports,
+        component_name,
+        resolved_state_type,
+        props_type,
+        import_props,
+        prop_fields,
+        import_has_slots,
+        style_cascade,
+        style_theme,
+        &[],
+    )
+}
+
+fn count_router_outlets(el: &Element) -> usize {
+    let mut count = if el.name == "RouterOutlet" { 1 } else { 0 };
+    for child in &el.children {
+        if let Node::Element(child_el) = child {
+            count += count_router_outlets(child_el);
+        }
+    }
+    count
+}
+
+fn format_interpolation(e: &str) -> String {
+    if e.contains(".render(") || e.contains("render_") || e.contains("children") {
+        e.to_string()
+    } else {
+        format!("{}.to_string()", e)
+    }
+}
+
+pub fn generate_with_imports_and_route_params(
+    doc: &Document,
+    file_id: usize,
+    imports: &[ResolvedImport],
+    component_name: Option<&str>,
+    resolved_state_type: Option<&str>,
+    props_type: Option<&str>,
+    import_props: &[(&str, Option<&str>)],
+    prop_fields: Option<&HashMap<String, Vec<PropField>>>,
+    import_has_slots: &[(&str, bool)],
+    style_cascade: Option<&fncc_styles::Stylesheet>,
+    style_theme: Option<&str>,
+    route_params: &[String],
+) -> String {
+    let router_outlet_count = count_router_outlets(&doc.root);
+    if router_outlet_count > 1 {
+        panic!(
+            "duplicate RouterOutlet usage is not allowed: found {} RouterOutlet elements",
+            router_outlet_count
+        );
+    }
+
     let mut out = String::new();
     let state_type = resolved_state_type.or(doc.state_type.as_deref());
     let has_state = state_type.is_some();
@@ -81,6 +137,7 @@ pub fn generate_with_imports(
             has_slot,
             style_cascade,
             style_theme,
+            route_params,
         );
     }
 
@@ -99,16 +156,31 @@ fn generate_stateless(
     has_slot: bool,
     style_cascade: Option<&fncc_styles::Stylesheet>,
     style_theme: Option<&str>,
+    route_params: &[String],
 ) {
     let name = component_name.unwrap_or(&doc.root.name);
     let fn_name = format!("render_{}", to_snake_case(name));
 
-    let params = match (props_type, has_slot) {
-        (Some(pt), true) => format!("props: &{pt}, children: impl IntoElement"),
-        (Some(pt), false) => format!("props: &{pt}"),
-        (None, true) => "children: impl IntoElement".to_string(),
-        (None, false) => String::new(),
-    };
+    if !route_params.is_empty()
+        && let Some(pt) = props_type
+    {
+        panic!(
+            "routes combining dynamic parameters and props are not supported: screen '{}' has params {:?} and props type '{}'",
+            name, route_params, pt
+        );
+    }
+
+    let mut param_parts = Vec::new();
+    for p in route_params {
+        param_parts.push(format!("{p}: &str"));
+    }
+    if let Some(pt) = props_type {
+        param_parts.push(format!("props: &{pt}"));
+    }
+    if has_slot {
+        param_parts.push("children: impl IntoElement".to_string());
+    }
+    let params = param_parts.join(", ");
 
     let sig = if params.is_empty() {
         format!("pub fn {fn_name}() -> impl IntoElement {{\n")
@@ -211,7 +283,7 @@ fn gen_if_expr(
         }
         if el.name != "Else" {
             if let Some(cond) = parser::get_condition_attr(el) {
-                let e = interpolation_expr(cond);
+                let e = interpolation_expr(cond, stateful);
                 expr.push_str(&e);
                 expr.push(' ');
             } else {
@@ -226,8 +298,9 @@ fn gen_if_expr(
             [single] => match single {
                 Node::Text(t) => expr.push_str(&format!("div().child({:?})", t)),
                 Node::Interpolation(interp) => {
-                    let e = interpolation_expr(interp);
-                    expr.push_str(&format!("div().child({e}.to_string())"));
+                    let e = interpolation_expr(interp, stateful);
+                    let formatted = format_interpolation(&e);
+                    expr.push_str(&format!("div().child({formatted})"));
                 }
                 Node::Element(child_el) => {
                     let child_code = generate_element(
@@ -250,8 +323,9 @@ fn gen_if_expr(
                     match child {
                         Node::Text(t) => expr.push_str(&format!(".child({:?})", t)),
                         Node::Interpolation(interp) => {
-                            let e = interpolation_expr(interp);
-                            expr.push_str(&format!(".child({e}.to_string())"));
+                            let e = interpolation_expr(interp, stateful);
+                            let formatted = format_interpolation(&e);
+                            expr.push_str(&format!(".child({formatted})"));
                         }
                         Node::Element(child_el) => {
                             let child_code = generate_element(
@@ -299,7 +373,7 @@ fn gen_for_expr(
     };
     let let_var = parser::get_let_attr(el).unwrap_or("item");
     let index_var = parser::get_index_attr(el);
-    let iter_expr = interpolation_expr(each);
+    let iter_expr = interpolation_expr(each, stateful);
 
     let mut body = String::new();
     match &el.children[..] {
@@ -307,8 +381,9 @@ fn gen_for_expr(
         [single] => match single {
             Node::Text(t) => body.push_str(&format!("div().child({:?})", t)),
             Node::Interpolation(interp) => {
-                let e = interpolation_expr(interp);
-                body.push_str(&format!("div().child({e}.to_string())"));
+                let e = interpolation_expr(interp, stateful);
+                let formatted = format_interpolation(&e);
+                body.push_str(&format!("div().child({formatted})"));
             }
             Node::Element(child_el) => {
                 let child_code = generate_element(
@@ -331,8 +406,9 @@ fn gen_for_expr(
                 match child {
                     Node::Text(t) => body.push_str(&format!(".child({:?})", t)),
                     Node::Interpolation(interp) => {
-                        let e = interpolation_expr(interp);
-                        body.push_str(&format!(".child({e}.to_string())"));
+                        let e = interpolation_expr(interp, stateful);
+                        let formatted = format_interpolation(&e);
+                        body.push_str(&format!(".child({formatted})"));
                     }
                     Node::Element(child_el) => {
                         let child_code = generate_element(
@@ -456,7 +532,7 @@ fn generate_element(
                 style_theme,
             )
         }
-        "Slot" => "children".to_string(),
+        "RouterOutlet" | "Slot" => "children".to_string(),
         _ => {
             if let Some(render_fn) = imports
                 .iter()
@@ -548,7 +624,7 @@ fn gen_import_call(
                 if let Some((_, attr_val)) = el.attrs.iter().find(|(n, _)| n == &f.name) {
                     let v = match attr_val {
                         AttrValue::String(s) => format!("{:?}.into()", s),
-                        AttrValue::Interpolation(expr) => format!("{}.into()", interpolation_expr(expr)),
+                        AttrValue::Interpolation(expr) => format!("{}.into()", interpolation_expr(expr, stateful)),
                     };
                     struct_fields.push_str(&format!("\n{indent}        {}: {},", f.name, v));
                 } else if f.is_optional {
@@ -562,7 +638,7 @@ fn gen_import_call(
                 }
                 let v = match attr_val {
                     AttrValue::String(s) => format!("{:?}.into()", s),
-                    AttrValue::Interpolation(expr) => format!("{}.into()", interpolation_expr(expr)),
+                    AttrValue::Interpolation(expr) => format!("{}.into()", interpolation_expr(expr, stateful)),
                 };
                 struct_fields.push_str(&format!("\n{indent}        {attr_name}: {v},"));
             }
@@ -769,8 +845,9 @@ fn generate_children_code(
                         out.push_str(&format!("{indent}        {:?}", t));
                     }
                     Node::Interpolation(expr) => {
-                        let e = interpolation_expr(expr);
-                        out.push_str(&format!("{indent}        {e}.to_string()"));
+                        let e = interpolation_expr(expr, stateful);
+                        let formatted = format_interpolation(&e);
+                        out.push_str(&format!("{indent}        {formatted}"));
                     }
                 }
                 out.push('\n');
@@ -868,8 +945,9 @@ fn gen_text(
             out.push_str(&format!("{indent}    .child({:?})", t));
         }
         [Node::Interpolation(expr)] => {
-            let e = interpolation_expr(expr);
-            out.push_str(&format!("{indent}    .child({e}.to_string())"));
+            let e = interpolation_expr(expr, stateful);
+            let formatted = format_interpolation(&e);
+            out.push_str(&format!("{indent}    .child({formatted})"));
         }
         children => {
             out.push_str(&generate_children_code(
@@ -934,8 +1012,9 @@ fn gen_button(
     match &el.children[..] {
         [Node::Text(t)] => out.push_str(&format!("{indent}    .child({:?})", t)),
         [Node::Interpolation(expr)] => {
-            let e = interpolation_expr(expr);
-            out.push_str(&format!("{indent}    .child({e}.to_string())"));
+            let e = interpolation_expr(expr, stateful);
+            let formatted = format_interpolation(&e);
+            out.push_str(&format!("{indent}    .child({formatted})"));
         }
         children => {
             out.push_str(&generate_children_code(
@@ -1007,18 +1086,25 @@ fn float_lit(n: f64) -> String {
     }
 }
 
-/// Resolve an interpolation expression to the correct Rust variable reference.
-/// - `state.field` → `self.field` (for stateful components)
-/// - `props.field` → `props.field` (for stateless components with props)
-/// - `bare_expr` → `self.bare_expr` (fallback for stateful components)
-fn interpolation_expr(expr: &str) -> String {
+/// Transform an interpolation expression for code generation.
+///
+/// - `state.field` -> `self.field` (stateful) or `field` (stateless)
+/// - `props.field` -> `props.field`
+/// - `bare_expr` -> `self.bare_expr` (stateful) or `bare_expr` (stateless)
+fn interpolation_expr(expr: &str, stateful: bool) -> String {
     let trimmed = expr.trim();
     if let Some(field) = trimmed.strip_prefix("state.") {
-        format!("self.{field}")
+        if stateful {
+            format!("self.{field}")
+        } else {
+            field.to_string()
+        }
     } else if trimmed.starts_with("props.") {
         trimmed.to_string()
-    } else {
+    } else if stateful {
         format!("self.{trimmed}")
+    } else {
+        trimmed.to_string()
     }
 }
 
@@ -1189,8 +1275,8 @@ mod tests {
     #[test]
     fn test_interpolation_strips_state_prefix() {
         let out = generate_from("<Text>{state.count}</Text>");
-        // stateless, so state. prefix is stripped but no self. prefix
-        assert!(out.contains("self.count.to_string()"));
+        // stateless, so state. prefix is stripped and no self. prefix
+        assert!(out.contains("count.to_string()"));
     }
 
     #[test]
@@ -1577,7 +1663,7 @@ mod tests {
     #[test]
     fn test_if_generates_if_expression() {
         let out = generate_from("<If condition=\"{state.show}\"><Text>Hi</Text></If>");
-        assert!(out.contains("if self.show {"));
+        assert!(out.contains("if show {"));
         assert!(out.contains("div().child(div().child(\"Hi\"))"));
         assert!(out.contains("} else {"), "else branch should be present");
         assert!(out.contains("div() }"));
@@ -1587,7 +1673,7 @@ mod tests {
     fn test_if_else_chain() {
         let src = "<Stack><If condition=\"{state.a}\"><Text>A</Text></If><Else><Text>B</Text></Else></Stack>";
         let out = generate_from(src);
-        assert!(out.contains("if self.a {"));
+        assert!(out.contains("if a {"));
         assert!(out.contains("} else {"));
         assert!(out.contains("div().child(\"B\")"));
     }
@@ -1596,15 +1682,15 @@ mod tests {
     fn test_if_elseif_else_chain() {
         let src = "<Stack><If condition=\"{state.x}\"><Text>X</Text></If><ElseIf condition=\"{state.y}\"><Text>Y</Text></ElseIf><Else><Text>Z</Text></Else></Stack>";
         let out = generate_from(src);
-        assert!(out.contains("if self.x {"));
-        assert!(out.contains("else if self.y {"));
+        assert!(out.contains("if x {"));
+        assert!(out.contains("else if y {"));
         assert!(out.contains("else {"));
     }
 
     #[test]
     fn test_for_generates_iteration() {
         let out = generate_from("<For each=\"{state.items}\" let=\"item\"><Text>{item.name}</Text></For>");
-        assert!(out.contains("self.items.iter().map(|item| {"));
+        assert!(out.contains("items.iter().map(|item| {"));
         assert!(out.contains("item.name"));
     }
 
@@ -1645,7 +1731,7 @@ mod tests {
     fn test_if_in_stack() {
         let src = "<Stack><If condition=\"{state.flag}\"><Text>Yes</Text></If><Text>Always</Text></Stack>";
         let out = generate_from(src);
-        assert!(out.contains("if self.flag {"));
+        assert!(out.contains("if flag {"));
         assert!(out.contains("\"Always\""));
     }
 
@@ -1653,7 +1739,7 @@ mod tests {
     fn test_for_in_stack() {
         let src = "<Stack><For each=\"{state.items}\" let=\"item\"><Text>{item}</Text></For></Stack>";
         let out = generate_from(src);
-        assert!(out.contains("self.items.iter().map(|item| {"));
+        assert!(out.contains("items.iter().map(|item| {"));
         assert!(out.contains(".children("));
     }
 
