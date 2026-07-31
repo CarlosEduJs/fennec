@@ -5,11 +5,11 @@ homepage = "https://github.com/carlosedujs/fncc"
 license = "Apache-2.0"
 name = "fncc-core"
 repository = "https://github.com/carlosedujs/fncc"
-version = "0.6.0"
+version = "0.7.0"
 
 [dependencies]
 anyhow = "1"
-fncc-styles = { path = "../fncc-styles", version = "0.0.0" }
+fncc-styles = { path = "../fncc-styles", version = "0.1.0" }
 pest = "2"
 pest_derive = "2"
 quote = "1"
