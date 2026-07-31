@@ -51,6 +51,24 @@ pub fn generate_with_imports(
     )
 }
 
+fn count_router_outlets(el: &Element) -> usize {
+    let mut count = if el.name == "RouterOutlet" { 1 } else { 0 };
+    for child in &el.children {
+        if let Node::Element(child_el) = child {
+            count += count_router_outlets(child_el);
+        }
+    }
+    count
+}
+
+fn format_interpolation(e: &str) -> String {
+    if e.contains(".render(") || e.contains("render_") || e.contains("children") {
+        e.to_string()
+    } else {
+        format!("{}.to_string()", e)
+    }
+}
+
 pub fn generate_with_imports_and_route_params(
     doc: &Document,
     file_id: usize,
@@ -65,6 +83,14 @@ pub fn generate_with_imports_and_route_params(
     style_theme: Option<&str>,
     route_params: &[String],
 ) -> String {
+    let router_outlet_count = count_router_outlets(&doc.root);
+    if router_outlet_count > 1 {
+        panic!(
+            "duplicate RouterOutlet usage is not allowed: found {} RouterOutlet elements",
+            router_outlet_count
+        );
+    }
+
     let mut out = String::new();
     let state_type = resolved_state_type.or(doc.state_type.as_deref());
     let has_state = state_type.is_some();
@@ -134,6 +160,15 @@ fn generate_stateless(
 ) {
     let name = component_name.unwrap_or(&doc.root.name);
     let fn_name = format!("render_{}", to_snake_case(name));
+
+    if !route_params.is_empty()
+        && let Some(pt) = props_type
+    {
+        panic!(
+            "routes combining dynamic parameters and props are not supported: screen '{}' has params {:?} and props type '{}'",
+            name, route_params, pt
+        );
+    }
 
     let mut param_parts = Vec::new();
     for p in route_params {
@@ -264,7 +299,8 @@ fn gen_if_expr(
                 Node::Text(t) => expr.push_str(&format!("div().child({:?})", t)),
                 Node::Interpolation(interp) => {
                     let e = interpolation_expr(interp, stateful);
-                    expr.push_str(&format!("div().child({e}.to_string())"));
+                    let formatted = format_interpolation(&e);
+                    expr.push_str(&format!("div().child({formatted})"));
                 }
                 Node::Element(child_el) => {
                     let child_code = generate_element(
@@ -288,7 +324,8 @@ fn gen_if_expr(
                         Node::Text(t) => expr.push_str(&format!(".child({:?})", t)),
                         Node::Interpolation(interp) => {
                             let e = interpolation_expr(interp, stateful);
-                            expr.push_str(&format!(".child({e}.to_string())"));
+                            let formatted = format_interpolation(&e);
+                            expr.push_str(&format!(".child({formatted})"));
                         }
                         Node::Element(child_el) => {
                             let child_code = generate_element(
@@ -345,7 +382,8 @@ fn gen_for_expr(
             Node::Text(t) => body.push_str(&format!("div().child({:?})", t)),
             Node::Interpolation(interp) => {
                 let e = interpolation_expr(interp, stateful);
-                body.push_str(&format!("div().child({e}.to_string())"));
+                let formatted = format_interpolation(&e);
+                body.push_str(&format!("div().child({formatted})"));
             }
             Node::Element(child_el) => {
                 let child_code = generate_element(
@@ -369,7 +407,8 @@ fn gen_for_expr(
                     Node::Text(t) => body.push_str(&format!(".child({:?})", t)),
                     Node::Interpolation(interp) => {
                         let e = interpolation_expr(interp, stateful);
-                        body.push_str(&format!(".child({e}.to_string())"));
+                        let formatted = format_interpolation(&e);
+                        body.push_str(&format!(".child({formatted})"));
                     }
                     Node::Element(child_el) => {
                         let child_code = generate_element(
@@ -807,7 +846,8 @@ fn generate_children_code(
                     }
                     Node::Interpolation(expr) => {
                         let e = interpolation_expr(expr, stateful);
-                        out.push_str(&format!("{indent}        {e}.to_string()"));
+                        let formatted = format_interpolation(&e);
+                        out.push_str(&format!("{indent}        {formatted}"));
                     }
                 }
                 out.push('\n');
@@ -906,7 +946,8 @@ fn gen_text(
         }
         [Node::Interpolation(expr)] => {
             let e = interpolation_expr(expr, stateful);
-            out.push_str(&format!("{indent}    .child({e}.to_string())"));
+            let formatted = format_interpolation(&e);
+            out.push_str(&format!("{indent}    .child({formatted})"));
         }
         children => {
             out.push_str(&generate_children_code(
@@ -972,7 +1013,8 @@ fn gen_button(
         [Node::Text(t)] => out.push_str(&format!("{indent}    .child({:?})", t)),
         [Node::Interpolation(expr)] => {
             let e = interpolation_expr(expr, stateful);
-            out.push_str(&format!("{indent}    .child({e}.to_string())"));
+            let formatted = format_interpolation(&e);
+            out.push_str(&format!("{indent}    .child({formatted})"));
         }
         children => {
             out.push_str(&generate_children_code(

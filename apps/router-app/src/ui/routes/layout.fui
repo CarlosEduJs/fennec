@@ -1,3 +1,7 @@
+---
+@state AppState
+---
+
 <Styles>
 :root {
   $bg-main: #09090b;
@@ -63,6 +67,6 @@
         </Stack>
     </Stack>
     <Stack class="outlet-container">
-        <RouterOutlet />
+        {state.router.current().render()}
     </Stack>
 </Stack>

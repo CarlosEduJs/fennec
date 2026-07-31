@@ -525,6 +525,17 @@ pub fn generate_all_with_options(opts: GenerateOptions) -> Result<()> {
             .map(|r| r.params.as_slice())
             .unwrap_or(&[]);
 
+        if let Some(state_ty) = resolved_state
+            && !route_params.is_empty()
+        {
+            anyhow::bail!(
+                "in '{}': dynamic route screens must be stateless in v0.1 (found state type '{}' on route with params {:?})",
+                pf.path.display(),
+                state_ty,
+                route_params
+            );
+        }
+
         let generated = codegen::generate_with_imports_and_route_params(
             &pf.ast,
             file_id,
@@ -544,20 +555,11 @@ pub fn generate_all_with_options(opts: GenerateOptions) -> Result<()> {
     }
 
     // Generate Native File-Based Routing (NFBR) code if routes directory is present
-    let routes_dir = if ui_dir.file_name() == Some(std::ffi::OsStr::new("routes")) {
-        Some(ui_dir.to_path_buf())
-    } else if ui_dir.join("routes").is_dir() {
-        Some(ui_dir.join("routes"))
-    } else {
-        None
-    };
-
-    if let Some(ref r_dir) = routes_dir {
-        let route_tree = RouteTree::scan(r_dir)?;
-        if !route_tree.routes.is_empty() || route_tree.fallback.is_some() {
-            let router_code = router::generate_router_code(&route_tree);
-            output.push_str(&router_code);
-        }
+    if let Some(ref tree) = route_tree
+        && (!tree.routes.is_empty() || tree.fallback.is_some())
+    {
+        let router_code = router::generate_router_code(tree);
+        output.push_str(&router_code);
     }
 
     std::fs::write(out_file, &output).context("failed to write generated file")?;

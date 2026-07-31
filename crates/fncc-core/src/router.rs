@@ -25,9 +25,8 @@ pub struct RouteInfo {
 impl RouteInfo {
     /// Compare priority for route resolution.
     /// Priority order (highest to lowest):
-    /// 1. Static route segments beat dynamic route segments.
-    /// 2. Fewer dynamic parameters beat more dynamic parameters.
-    /// 3. Longer static prefix beats shorter.
+    /// 1. Positional static segments take precedence over dynamic segments.
+    /// 2. Greater total segment count.
     pub fn cmp_priority(&self, other: &Self) -> Ordering {
         let self_segments: Vec<&str> = self.pattern.split('/').filter(|s| !s.is_empty()).collect();
         let other_segments: Vec<&str> = other.pattern.split('/').filter(|s| !s.is_empty()).collect();
@@ -113,11 +112,21 @@ impl RouteTree {
 
         let mut current_layouts = parent_layouts.to_vec();
         if has_local_layout {
-            let rel_layout = layout_file
-                .strip_prefix(routes_root)
-                .unwrap_or(&layout_file)
-                .to_path_buf();
-            current_layouts.push(rel_layout);
+            let is_stateful = if let Ok(source) = std::fs::read_to_string(&layout_file)
+                && let Ok(ast) = crate::parser::parse(&source)
+            {
+                ast.state_type.is_some()
+            } else {
+                false
+            };
+
+            if !is_stateful {
+                let rel_layout = layout_file
+                    .strip_prefix(routes_root)
+                    .unwrap_or(&layout_file)
+                    .to_path_buf();
+                current_layouts.push(rel_layout);
+            }
         }
 
         // Process files in current directory
@@ -239,6 +248,11 @@ impl RouteTree {
         let mut patterns: HashMap<&str, &RouteInfo> = HashMap::new();
         let mut variants: HashMap<&str, &RouteInfo> = HashMap::new();
 
+        if let Some(ref fb) = self.fallback {
+            patterns.insert(fb.pattern.as_str(), fb);
+            variants.insert(fb.variant_name.as_str(), fb);
+        }
+
         for route in &self.routes {
             // Validate duplicate parameter names within single route
             let mut seen_params = std::collections::HashSet::new();
@@ -273,6 +287,33 @@ impl RouteTree {
                 );
             }
             variants.insert(&route.variant_name, route);
+        }
+
+        // Validate unique layout function names
+        let mut layouts: std::collections::HashSet<&Path> = std::collections::HashSet::new();
+        for route in &self.routes {
+            for layout in &route.layout_chain {
+                layouts.insert(layout.as_path());
+            }
+        }
+        if let Some(ref fb) = self.fallback {
+            for layout in &fb.layout_chain {
+                layouts.insert(layout.as_path());
+            }
+        }
+
+        let mut layout_names: HashMap<String, &Path> = HashMap::new();
+        for layout in layouts {
+            let fn_name = layout_fn_name(layout);
+            if let Some(existing) = layout_names.get(&fn_name) {
+                bail!(
+                    "duplicate generated layout function name '{}' from distinct layouts '{:?}' and '{:?}'",
+                    fn_name,
+                    existing,
+                    layout
+                );
+            }
+            layout_names.insert(fn_name, layout);
         }
 
         Ok(())
@@ -318,7 +359,15 @@ fn parse_segment(stem: &str, path: &Path) -> Result<PathSegment> {
 }
 
 fn is_valid_param_name(name: &str) -> bool {
-    if name.is_empty() {
+    const RUST_KEYWORDS: &[&str] = &[
+        "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum", "extern", "false", "fn",
+        "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub", "ref", "return", "self",
+        "Self", "static", "struct", "super", "trait", "true", "type", "union", "unsafe", "use", "where", "while",
+        "abstract", "become", "box", "do", "final", "macro", "override", "priv", "try", "typeof", "unsized", "virtual",
+        "yield",
+    ];
+
+    if name.is_empty() || RUST_KEYWORDS.contains(&name) {
         return false;
     }
     let mut chars = name.chars();
@@ -382,6 +431,30 @@ pub fn to_pascal_case(s: &str) -> String {
     if result.is_empty() { "Route".to_string() } else { result }
 }
 
+fn validate_layout_outlet_count(layout_abs: &Path) -> Result<(), String> {
+    let source = std::fs::read_to_string(layout_abs).map_err(|e| format!("failed to read layout file: {e}"))?;
+    let doc = crate::parser::parse(&source)?;
+
+    fn count_outlets(el: &crate::parser::Element) -> usize {
+        let mut count = if el.name == "RouterOutlet" { 1 } else { 0 };
+        for child in &el.children {
+            if let crate::parser::Node::Element(child_el) = child {
+                count += count_outlets(child_el);
+            }
+        }
+        count
+    }
+
+    let count = count_outlets(&doc.root);
+    if count != 1 {
+        return Err(format!(
+            "layout file must contain exactly one <RouterOutlet /> (found {})",
+            count
+        ));
+    }
+    Ok(())
+}
+
 /// Generate Rust code for the compile-time router:
 /// - `pub enum Route` with variants for all screens and fallback
 /// - `Route::from_uri(&str) -> Option<Route>` for deep link parsing
@@ -424,13 +497,14 @@ pub fn generate_router_code(tree: &RouteTree) -> String {
     out.push_str("        } else {\n");
     out.push_str("            uri\n");
     out.push_str("        };\n");
+    out.push_str("        let path = path.split('?').next().unwrap_or(path).split('#').next().unwrap_or(path);\n");
     out.push_str("        let segs: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();\n\n");
 
     for route in &tree.routes {
         let pattern_segs: Vec<&str> = route.pattern.split('/').filter(|s| !s.is_empty()).collect();
         if pattern_segs.is_empty() {
             out.push_str("        if segs.is_empty() {\n");
-            out.push_str("            return Some(Route::Index);\n");
+            out.push_str(&format!("            return Some(Route::{});\n", route.variant_name));
             out.push_str("        }\n");
         } else {
             let mut pattern_match = String::new();
@@ -521,6 +595,18 @@ pub fn generate_router_code(tree: &RouteTree) -> String {
 
         // Wrap target_call in layout_chain from innermost to outermost
         for layout_rel in route.layout_chain.iter().rev() {
+            let mut routes_root = route.file_path.clone();
+            for _ in route.relative_path.components() {
+                routes_root.pop();
+            }
+            let layout_abs = routes_root.join(layout_rel);
+            if let Err(err) = validate_layout_outlet_count(&layout_abs) {
+                panic!(
+                    "route-level diagnostic: layout file '{}' is invalid: {}",
+                    layout_rel.display(),
+                    err
+                );
+            }
             let layout_fn = layout_fn_name(layout_rel);
             target_call = format!("{}({})", layout_fn, target_call);
         }
@@ -543,6 +629,18 @@ pub fn generate_router_code(tree: &RouteTree) -> String {
     if let Some(fb) = &tree.fallback {
         let mut target_call = "render_fallback()".to_string();
         for layout_rel in fb.layout_chain.iter().rev() {
+            let mut routes_root = fb.file_path.clone();
+            for _ in fb.relative_path.components() {
+                routes_root.pop();
+            }
+            let layout_abs = routes_root.join(layout_rel);
+            if let Err(err) = validate_layout_outlet_count(&layout_abs) {
+                panic!(
+                    "route-level diagnostic: layout file '{}' is invalid: {}",
+                    layout_rel.display(),
+                    err
+                );
+            }
             let layout_fn = layout_fn_name(layout_rel);
             target_call = format!("{}({})", layout_fn, target_call);
         }
@@ -714,7 +812,7 @@ mod tests {
     fn test_generate_router_code() {
         let (root, routes) = test_routes_dir();
 
-        std::fs::write(routes.join("layout.fui"), "<RootLayout />").unwrap();
+        std::fs::write(routes.join("layout.fui"), "<RootLayout><RouterOutlet /></RootLayout>").unwrap();
         std::fs::write(routes.join("index.fui"), "<Home />").unwrap();
         std::fs::write(routes.join("settings.fui"), "<Settings />").unwrap();
 
@@ -755,6 +853,42 @@ mod tests {
         assert!(res.is_err());
         let err = res.unwrap_err().to_string();
         assert!(err.contains("files cannot represent route groups"));
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn test_route_priority_static_over_dynamic() {
+        let (root, routes) = test_routes_dir();
+
+        let users_dir = routes.join("users");
+        std::fs::create_dir_all(&users_dir).unwrap();
+        std::fs::write(users_dir.join("settings.fui"), "<Text>Settings</Text>").unwrap();
+        std::fs::write(users_dir.join("[id].fui"), "<Text>UserDetail</Text>").unwrap();
+
+        let tree = RouteTree::scan(&routes).unwrap();
+
+        assert_eq!(tree.routes.len(), 2);
+        assert_eq!(tree.routes[0].pattern, "/users/settings");
+        assert_eq!(tree.routes[1].pattern, "/users/:id");
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_layout_validation_duplicate_outlets() {
+        let (root, routes) = test_routes_dir();
+
+        std::fs::write(
+            routes.join("layout.fui"),
+            "<Stack><RouterOutlet /><RouterOutlet /></Stack>",
+        )
+        .unwrap();
+        std::fs::write(routes.join("index.fui"), "<Home />").unwrap();
+
+        let tree = RouteTree::scan(&routes).unwrap();
+        let _code = generate_router_code(&tree);
 
         std::fs::remove_dir_all(&root).unwrap();
     }

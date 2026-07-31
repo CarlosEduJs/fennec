@@ -1,58 +1,41 @@
 use fncc::*;
-use std::sync::Mutex;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-static ROUTER: Mutex<Option<Router<Route>>> = Mutex::new(None);
-
-fn with_router<F, R>(f: F) -> R
-where
-    F: FnOnce(&mut Router<Route>) -> R,
-{
-    let mut guard = ROUTER.lock().unwrap();
-    let router = guard.get_or_insert_with(|| Router::new(Route::Index));
-    f(router)
+#[fncc::command]
+fn nav_home(state: &mut AppState, cx: &mut Context<AppState>) {
+    state.router.push(Route::Index);
+    cx.notify();
 }
 
 #[fncc::command]
-fn nav_home() {
-    with_router(|r| r.push(Route::Index));
+fn nav_settings(state: &mut AppState, cx: &mut Context<AppState>) {
+    state.router.push(Route::Settings);
+    cx.notify();
 }
 
 #[fncc::command]
-fn nav_settings() {
-    with_router(|r| r.push(Route::Settings));
+fn nav_analytics(state: &mut AppState, cx: &mut Context<AppState>) {
+    state.router.push(Route::Analytics);
+    cx.notify();
 }
 
 #[fncc::command]
-fn nav_analytics() {
-    with_router(|r| r.push(Route::Analytics));
-}
-
-#[fncc::command]
-fn nav_user_alice() {
-    with_router(|r| {
-        r.push(Route::UsersId {
-            id: "alice".to_string(),
-        })
+fn nav_user_alice(state: &mut AppState, cx: &mut Context<AppState>) {
+    state.router.push(Route::UsersId {
+        id: "alice".to_string(),
     });
+    cx.notify();
 }
 
 #[fncc::command]
-fn nav_back() {
-    with_router(|r| {
-        r.pop();
-    });
+fn nav_back(state: &mut AppState, cx: &mut Context<AppState>) {
+    state.router.pop();
+    cx.notify();
 }
 
-#[derive(Default)]
-struct AppState;
-
-impl Render for AppState {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        let route = with_router(|r| r.current().clone());
-        render_router_outlet(&route)
-    }
+struct AppState {
+    router: Router<Route>,
 }
 
 fn main() {
@@ -63,7 +46,11 @@ fn main() {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 ..Default::default()
             },
-            |_, cx| cx.new(|_| AppState),
+            |_, cx| {
+                cx.new(|_| AppState {
+                    router: Router::new(Route::Index),
+                })
+            },
         )
         .unwrap();
     });
