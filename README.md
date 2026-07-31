@@ -227,13 +227,13 @@ The macro generates a **trampoline** (`__fncc_cmd_{name}`) that adapts the user'
     - [x] `style compiler`
     - [x] `variables`
 
-- [ ] Native File-Based Routing (NFBR)
-    - [ ] Route scanner
-    - [ ] Route tree generation
-    - [ ] Dynamic routes (`[id].fui`)
-    - [ ] Route parameters
-    - [ ] Navigation API
-    - [ ] Layout routes (optional)
+- [x] Native File-Based Routing (NFBR)
+    - [x] Route scanner
+    - [x] Route tree generation
+    - [x] Dynamic routes (`[id].fui`)
+    - [x] Route parameters
+    - [x] Navigation API
+    - [x] Layout routes (optional)
 
 ### Next
 
