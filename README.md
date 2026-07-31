@@ -219,8 +219,23 @@ The macro generates a **trampoline** (`__fncc_cmd_{name}`) that adapts the user'
     - [x] `<For>`
     - [x] `<Fragment>`
     - [x] `<Slot>`
+- [x] Styling system: FNCC Styles
+    - [x] `<style>`
+    - [x] `classes`
+    - [x] `theme`
+    - [x] `tokens`
+    - [x] `style compiler`
+    - [x] `variables`
 
 ### Next
+
+- [ ] File-Based Routing (FBR) - use `gpui-navigator`
+    - [ ] Route scanner
+    - [ ] Route tree generation
+    - [ ] Dynamic routes (`[id].fui`)
+    - [ ] Route parameters
+    - [ ] Navigation API
+    - [ ] Layout routes (optional)
 
 - [ ] LSP metadata generation
     - [ ] autocomplete
@@ -228,15 +243,8 @@ The macro generates a **trampoline** (`__fncc_cmd_{name}`) that adapts the user'
     - [ ] hover
     - [ ] rename
     - [ ] go to definition
-- [ ] Styling system: FNCC Styles
-    - [ ] `<style>`
-    - [ ] `classes`
-    - [ ] `theme`
-    - [ ] `tokens`
-    - [ ] `style compiler`
-    - [ ] `variables`
 
-- [ ] Freeze the syntax and grammar of .fui files - v0.1^ (Status: Still awaiting implementation of FNCC Styles. PARTIALLY IMPLEMENTED)
+- [ ] Freeze the syntax and grammar of .fui files - v0.1^ (Status: Still awaiting. PARTIALLY IMPLEMENTED)
 - [ ] `fncc` CLI (`fncc build`, `fncc dev`)
 - [ ] More components (Input, Image, List, Scroll)
 - [ ] Hot reload
