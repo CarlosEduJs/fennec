@@ -378,6 +378,197 @@ pub fn to_pascal_case(s: &str) -> String {
     if result.is_empty() { "Route".to_string() } else { result }
 }
 
+/// Generate Rust code for the compile-time router:
+/// - `pub enum Route` with variants for all screens and fallback
+/// - `Route::from_uri(&str) -> Option<Route>` for deep link parsing
+/// - `Route::path(&self) -> String` for path serialization
+/// - `Route::render(&self) -> impl IntoElement` for rendering screen + nested layouts
+/// - `pub fn render_router_outlet(route: &Route) -> impl IntoElement`
+pub fn generate_router_code(tree: &RouteTree) -> String {
+    let mut out = String::new();
+
+    out.push_str("/// Generated Route enum representing all application screens.\n");
+    out.push_str("#[derive(Debug, Clone, PartialEq, Eq)]\n");
+    out.push_str("pub enum Route {\n");
+
+    for route in &tree.routes {
+        out.push_str(&format!("    /// Pattern: {}\n", route.pattern));
+        if route.params.is_empty() {
+            out.push_str(&format!("    {},\n", route.variant_name));
+        } else {
+            out.push_str(&format!("    {} {{\n", route.variant_name));
+            for param in &route.params {
+                out.push_str(&format!("        {}: String,\n", param));
+            }
+            out.push_str("    },\n");
+        }
+    }
+
+    if let Some(fb) = &tree.fallback {
+        out.push_str("    /// Fallback route\n");
+        out.push_str(&format!("    {},\n", fb.variant_name));
+    }
+
+    out.push_str("}\n\n");
+
+    // impl Route
+    out.push_str("impl Route {\n");
+    out.push_str("    /// Parse a deep link URI or path into a Route.\n");
+    out.push_str("    pub fn from_uri(uri: &str) -> Option<Self> {\n");
+    out.push_str("        let path = if let Some(pos) = uri.find(\"://\") {\n");
+    out.push_str("            &uri[pos + 3..]\n");
+    out.push_str("        } else {\n");
+    out.push_str("            uri\n");
+    out.push_str("        };\n");
+    out.push_str("        let segs: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();\n\n");
+
+    for route in &tree.routes {
+        let pattern_segs: Vec<&str> = route.pattern.split('/').filter(|s| !s.is_empty()).collect();
+        if pattern_segs.is_empty() {
+            out.push_str("        if segs.is_empty() {\n");
+            out.push_str("            return Some(Route::Index);\n");
+            out.push_str("        }\n");
+        } else {
+            let mut pattern_match = String::new();
+            pattern_match.push('[');
+            for (i, seg) in pattern_segs.iter().enumerate() {
+                if i > 0 {
+                    pattern_match.push_str(", ");
+                }
+                if let Some(param) = seg.strip_prefix(':') {
+                    pattern_match.push_str(param);
+                } else {
+                    pattern_match.push_str(&format!("{:?}", seg));
+                }
+            }
+            pattern_match.push(']');
+
+            out.push_str(&format!("        if let {} = segs.as_slice() {{\n", pattern_match));
+            if route.params.is_empty() {
+                out.push_str(&format!("            return Some(Route::{});\n", route.variant_name));
+            } else {
+                out.push_str(&format!("            return Some(Route::{} {{\n", route.variant_name));
+                for param in &route.params {
+                    out.push_str(&format!("                {}: (*{}).to_string(),\n", param, param));
+                }
+                out.push_str("            });\n");
+            }
+            out.push_str("        }\n");
+        }
+    }
+
+    if tree.fallback.is_some() {
+        out.push_str("        Some(Route::Fallback)\n");
+    } else {
+        out.push_str("        None\n");
+    }
+
+    out.push_str("    }\n\n");
+
+    // pub fn path(&self) -> String
+    out.push_str("    /// Get canonical path for this route.\n");
+    out.push_str("    pub fn path(&self) -> String {\n");
+    out.push_str("        match self {\n");
+    for route in &tree.routes {
+        if route.params.is_empty() {
+            out.push_str(&format!(
+                "            Route::{} => {:?}.to_string(),\n",
+                route.variant_name, route.pattern
+            ));
+        } else {
+            let mut fmt_str = route.pattern.clone();
+            let mut args = String::new();
+            for param in &route.params {
+                fmt_str = fmt_str.replace(&format!(":{}", param), &format!("{{{}}}", param));
+                args.push_str(&format!(", {} = {}", param, param));
+            }
+            out.push_str(&format!(
+                "            Route::{} {{ {} }} => format!({:?}{}),\n",
+                route.variant_name,
+                route.params.join(", "),
+                fmt_str,
+                args
+            ));
+        }
+    }
+    if let Some(fb) = &tree.fallback {
+        out.push_str(&format!(
+            "            Route::{} => \"*\".to_string(),\n",
+            fb.variant_name
+        ));
+    }
+    out.push_str("        }\n");
+    out.push_str("    }\n");
+
+    // pub fn render(&self) -> impl IntoElement
+    out.push_str("    /// Render the view hierarchy corresponding to this route.\n");
+    out.push_str("    pub fn render(&self) -> impl IntoElement {\n");
+    out.push_str("        match self {\n");
+
+    for route in &tree.routes {
+        let target_fn = format!("render_{}", crate::codegen::to_snake_case(&route.variant_name));
+
+        let mut target_call = if route.params.is_empty() {
+            format!("{}()", target_fn)
+        } else {
+            let param_args: Vec<String> = route.params.iter().map(|p| format!("&{}", p)).collect();
+            format!("{}({})", target_fn, param_args.join(", "))
+        };
+
+        // Wrap target_call in layout_chain from innermost to outermost
+        for layout_rel in route.layout_chain.iter().rev() {
+            let layout_fn = layout_fn_name(layout_rel);
+            target_call = format!("{}({})", layout_fn, target_call);
+        }
+
+        if route.params.is_empty() {
+            out.push_str(&format!(
+                "            Route::{} => {},\n",
+                route.variant_name, target_call
+            ));
+        } else {
+            out.push_str(&format!(
+                "            Route::{} {{ {} }} => {},\n",
+                route.variant_name,
+                route.params.join(", "),
+                target_call
+            ));
+        }
+    }
+
+    if let Some(fb) = &tree.fallback {
+        let fallback_fn = format!("render_{}", crate::codegen::to_snake_case(&fb.variant_name));
+        let mut call = format!("{}()", fallback_fn);
+        for layout_rel in fb.layout_chain.iter().rev() {
+            let layout_fn = layout_fn_name(layout_rel);
+            call = format!("{}({})", layout_fn, call);
+        }
+        out.push_str(&format!("            Route::{} => {},\n", fb.variant_name, call));
+    }
+
+    out.push_str("        }\n");
+    out.push_str("    }\n");
+    out.push_str("}\n\n");
+
+    out.push_str("/// Render the active route outlet.\n");
+    out.push_str("pub fn render_router_outlet(route: &Route) -> impl IntoElement {\n");
+    out.push_str("    route.render()\n");
+    out.push_str("}\n\n");
+
+    out
+}
+
+fn layout_fn_name(layout_rel: &Path) -> String {
+    let parent = layout_rel.parent().unwrap_or_else(|| Path::new(""));
+    let parent_str = parent.to_string_lossy();
+    if parent_str.is_empty() {
+        "render_layout".to_string()
+    } else {
+        let pascal = to_pascal_case(&parent_str.replace('/', "_"));
+        format!("render_{}_layout", crate::codegen::to_snake_case(&pascal))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -508,6 +699,41 @@ mod tests {
         assert!(res.is_err());
         let err = res.unwrap_err().to_string();
         assert!(err.contains("invalid dynamic parameter syntax"));
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn test_generate_router_code() {
+        let (root, routes) = test_routes_dir();
+
+        std::fs::write(routes.join("layout.fui"), "<RootLayout />").unwrap();
+        std::fs::write(routes.join("index.fui"), "<Home />").unwrap();
+        std::fs::write(routes.join("settings.fui"), "<Settings />").unwrap();
+
+        let users_dir = routes.join("users");
+        std::fs::create_dir_all(&users_dir).unwrap();
+        std::fs::write(users_dir.join("[id].fui"), "<UserDetail />").unwrap();
+
+        std::fs::write(routes.join("fallback.fui"), "<NotFound />").unwrap();
+
+        let tree = RouteTree::scan(&routes).unwrap();
+        let code = generate_router_code(&tree);
+
+        assert!(code.contains("pub enum Route"));
+        assert!(code.contains("Index,"));
+        assert!(code.contains("Settings,"));
+        assert!(code.contains("UsersId {"));
+        assert!(code.contains("id: String,"));
+        assert!(code.contains("Fallback,"));
+
+        assert!(code.contains("pub fn from_uri(uri: &str) -> Option<Self>"));
+        assert!(code.contains("if let [\"settings\"] = segs.as_slice()"));
+        assert!(code.contains("if let [\"users\", id] = segs.as_slice()"));
+
+        assert!(code.contains("pub fn path(&self) -> String"));
+        assert!(code.contains("pub fn render(&self) -> impl IntoElement"));
+        assert!(code.contains("pub fn render_router_outlet(route: &Route) -> impl IntoElement"));
 
         std::fs::remove_dir_all(&root).unwrap();
     }

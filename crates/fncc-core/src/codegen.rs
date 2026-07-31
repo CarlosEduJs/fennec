@@ -456,7 +456,7 @@ fn generate_element(
                 style_theme,
             )
         }
-        "Slot" => "children".to_string(),
+        "RouterOutlet" | "Slot" => "children".to_string(),
         _ => {
             if let Some(render_fn) = imports
                 .iter()
