@@ -35,11 +35,7 @@ impl<R: Clone> Router<R> {
 
     /// Replace the top route on the stack with a new route.
     pub fn replace(&mut self, route: R) {
-        if let Some(top) = self.stack.last_mut() {
-            *top = route;
-        } else {
-            self.stack.push(route);
-        }
+        *self.stack.last_mut().expect("router stack must never be empty") = route;
     }
 
     /// Get the current navigation stack depth.

@@ -168,8 +168,12 @@ impl RouteTree {
                         file_variant_parts.push(to_pascal_case(&param));
                         file_path_segments.push(PathSegment::Dynamic(param));
                     }
-                    PathSegment::Group(_) => {
-                        // Files inside groups shouldn't happen directly as a segment, handled via dir
+                    PathSegment::Group(group_name) => {
+                        bail!(
+                            "files cannot represent route groups: standalone route file '{:?}' has group syntax '({})'",
+                            file,
+                            group_name
+                        );
                     }
                 }
             }
@@ -737,6 +741,20 @@ mod tests {
         assert!(code.contains("pub fn path(&self) -> String"));
         assert!(code.contains("pub fn render(&self) -> AnyElement"));
         assert!(code.contains("pub fn render_router_outlet(route: &Route) -> AnyElement"));
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn test_scan_group_file_error() {
+        let (root, routes) = test_routes_dir();
+
+        std::fs::write(routes.join("(app).fui"), "<Invalid />").unwrap();
+
+        let res = RouteTree::scan(&routes);
+        assert!(res.is_err());
+        let err = res.unwrap_err().to_string();
+        assert!(err.contains("files cannot represent route groups"));
 
         std::fs::remove_dir_all(&root).unwrap();
     }
