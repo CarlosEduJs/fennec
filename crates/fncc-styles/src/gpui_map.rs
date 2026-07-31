@@ -14,9 +14,18 @@ pub fn map(name: &str, value: &str) -> Result<Vec<GPUIMethodCall>, String> {
             "row" | "horizontal" => Ok(vec![]),
             other => Err(format!("unsupported flex-direction: `{other}`")),
         },
-        "flex" => Ok(vec![GPUIMethodCall {
-            code: format!("flex_{value}"),
-        }]),
+        "flex" => match value {
+            "1" => Ok(vec![GPUIMethodCall {
+                code: "flex_1()".into(),
+            }]),
+            "auto" => Ok(vec![GPUIMethodCall {
+                code: "flex_auto()".into(),
+            }]),
+            "none" => Ok(vec![GPUIMethodCall {
+                code: "flex_none()".into(),
+            }]),
+            other => Err(format!("unsupported flex value: `{other}`")),
+        },
         "align-items" | "align_items" => match value {
             "flex-start" | "start" => Ok(vec![GPUIMethodCall {
                 code: "items_start()".into(),
@@ -150,7 +159,7 @@ pub fn map(name: &str, value: &str) -> Result<Vec<GPUIMethodCall>, String> {
         "border-width" | "border_width" => {
             let n = parse_dim(value)?;
             Ok(vec![GPUIMethodCall {
-                code: format!("border(px({n}.))"),
+                code: format!("border(px({}))", float_lit(n)),
             }])
         }
         "border-color" | "border_color" => {
@@ -166,7 +175,7 @@ pub fn map(name: &str, value: &str) -> Result<Vec<GPUIMethodCall>, String> {
             while i < parts.len() {
                 if let Ok(n) = parse_dim(parts[i]) {
                     calls.push(GPUIMethodCall {
-                        code: format!("border(px({n}.))"),
+                        code: format!("border(px({}))", float_lit(n)),
                     });
                     i += 1;
                 } else if parse_color(parts[i]).is_ok() {
@@ -217,7 +226,7 @@ pub fn map(name: &str, value: &str) -> Result<Vec<GPUIMethodCall>, String> {
                     code: "text_3xl()".into(),
                 },
                 _ => GPUIMethodCall {
-                    code: format!("text_size(px({n}.))"),
+                    code: format!("text_size(px({}))", float_lit(n)),
                 },
             };
             Ok(vec![call])
@@ -279,13 +288,19 @@ fn parse_dim(value: &str) -> Result<f64, String> {
     if s.is_empty() {
         return Err("empty dimension value".into());
     }
-    let num_str = s
-        .strip_suffix("px")
-        .or(s.strip_suffix("rem"))
-        .or(s.strip_suffix("em"))
-        .or(s.strip_suffix("%"))
-        .unwrap_or(s);
+    if s.ends_with("rem") || s.ends_with("em") {
+        return Err(format!("unsupported dimension unit (use px or %): `{s}`"));
+    }
+    let num_str = s.strip_suffix("px").or(s.strip_suffix("%")).unwrap_or(s);
     num_str.parse::<f64>().map_err(|_| format!("invalid dimension: `{s}`"))
+}
+
+fn float_lit(n: f64) -> String {
+    if n.fract() == 0.0 {
+        format!("{n}.")
+    } else {
+        format!("{n}")
+    }
 }
 
 fn format_dim(value: &str) -> Result<String, String> {
@@ -302,7 +317,7 @@ fn format_dim(value: &str) -> Result<String, String> {
         }
     } else {
         let n = parse_dim(s)?;
-        Ok(format!("px({n}.)"))
+        Ok(format!("px({})", float_lit(n)))
     }
 }
 
@@ -313,6 +328,12 @@ fn parse_color(value: &str) -> Result<String, String> {
     }
     if let Some(hex) = s.strip_prefix('#') {
         let hex = hex.trim();
+        if hex.len() != 3 && hex.len() != 6 && hex.len() != 8 {
+            return Err(format!("invalid hex color: `{s}`"));
+        }
+        if !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(format!("invalid hex color: `{s}`"));
+        }
         let rgb = if hex.len() == 3 {
             let r = u8::from_str_radix(&hex[0..1].repeat(2), 16);
             let g = u8::from_str_radix(&hex[1..2].repeat(2), 16);
@@ -520,6 +541,43 @@ mod tests {
     #[test]
     fn test_map_justify_content_invalid() {
         let result = map("justify-content", "space-evenly");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_map_flex_valid_values() {
+        assert_eq!(map("flex", "1").unwrap()[0].code, "flex_1()");
+        assert_eq!(map("flex", "auto").unwrap()[0].code, "flex_auto()");
+        assert_eq!(map("flex", "none").unwrap()[0].code, "flex_none()");
+    }
+
+    #[test]
+    fn test_map_flex_invalid_value_errors() {
+        let result = map("flex", "2.5");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_map_gap_decimal_float_literal() {
+        let calls = map("gap", "12.5px").unwrap();
+        assert_eq!(calls[0].code, "gap(px(12.5))");
+    }
+
+    #[test]
+    fn test_map_padding_rem_rejected() {
+        let result = map("padding", "2rem");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_map_hex_color_rejects_unicode() {
+        let result = map("color", "#ff00\u{1F600}");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_map_hex_color_rejects_invalid_chars() {
+        let result = map("color", "#12g45h");
         assert!(result.is_err());
     }
 }

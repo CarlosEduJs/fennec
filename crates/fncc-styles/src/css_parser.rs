@@ -20,7 +20,11 @@ pub fn parse(css: &str) -> Result<Stylesheet, String> {
         }
 
         if trimmed.starts_with("/*") {
-            while i < lines.len() && !trimmed.contains("*/") {}
+            let mut current_line = trimmed.clone();
+            while !current_line.contains("*/") && i < lines.len() {
+                current_line = lines[i].trim().to_string();
+                i += 1;
+            }
             continue;
         }
 
@@ -180,7 +184,14 @@ fn finalize(
         BlockKind::Rules => {
             let name = block_name.take();
             if let Some(class_name) = name {
-                ss.rules.insert(class_name, props);
+                let entry = ss.rules.entry(class_name).or_default();
+                for (k, v) in props {
+                    if let Some(slot) = entry.iter_mut().find(|(k2, _)| k2 == &k) {
+                        slot.1 = v;
+                    } else {
+                        entry.push((k, v));
+                    }
+                }
             }
         }
         BlockKind::FontFace => {
@@ -236,6 +247,27 @@ mod tests {
         let props = ss.rules.get("btn").unwrap();
         assert_eq!(props[0], ("color".into(), "red".into()));
         assert_eq!(props[1], ("padding".into(), "16px".into()));
+    }
+
+    #[test]
+    fn test_parse_multiline_comment_does_not_hang() {
+        let css = "/* comment line one\n   comment line two */\n.btn { color: red; }";
+        let ss = parse(css).unwrap();
+        assert_eq!(ss.rules.get("btn").unwrap()[0], ("color".into(), "red".into()));
+    }
+
+    #[test]
+    fn test_parse_rules_duplicate_class_merges_by_property() {
+        let css = ".btn { color: red; }\n.btn { color: blue; padding: 8px; }";
+        let ss = parse(css).unwrap();
+        let props = ss.rules.get("btn").unwrap();
+        assert_eq!(
+            props.iter().filter(|(n, _)| n == "color").count(),
+            1,
+            "duplicate `color` declarations must merge into one"
+        );
+        assert_eq!(props[0], ("color".into(), "blue".into()));
+        assert_eq!(props[1], ("padding".into(), "8px".into()));
     }
 
     #[test]

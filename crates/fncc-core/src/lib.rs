@@ -35,8 +35,16 @@ fn collect_fncss_files(dir: &Path) -> Result<HashMap<PathBuf, fncc_styles::Style
 }
 
 fn collect_fncss_recursive(current: &Path, sheets: &mut HashMap<PathBuf, fncc_styles::Stylesheet>) -> Result<()> {
-    for entry in std::fs::read_dir(current).context("failed to read dir")? {
-        let entry = entry.context("failed to read entry")?;
+    if !current.is_dir() {
+        return Ok(());
+    }
+    let mut entries: Vec<_> = std::fs::read_dir(current)
+        .with_context(|| format!("failed to read dir {:?}", current))?
+        .collect::<std::io::Result<Vec<_>>>()
+        .with_context(|| format!("failed to read entry in {:?}", current))?;
+    entries.sort_by_key(|e| e.file_name());
+
+    for entry in entries {
         let path = entry.path();
         if path.is_dir() {
             collect_fncss_recursive(&path, sheets)?;
@@ -46,7 +54,11 @@ fn collect_fncss_recursive(current: &Path, sheets: &mut HashMap<PathBuf, fncc_st
                 Ok(mut ss) => {
                     let parent = path.parent().unwrap_or(current).to_path_buf();
                     resolve_font_paths(&mut ss, &parent)?;
-                    sheets.insert(parent, ss);
+                    let merged = match sheets.remove(&parent) {
+                        Some(prev) => fncc_styles::merge(vec![prev, ss]),
+                        None => ss,
+                    };
+                    sheets.insert(parent, merged);
                 }
                 Err(e) => anyhow::bail!("failed to parse {:?}: {e}", path),
             }
@@ -91,16 +103,15 @@ fn generate_fonts_code(sheets: &HashMap<PathBuf, fncc_styles::Stylesheet>, out_f
     let mut entries = String::new();
     for (_, path) in &fonts {
         let src = Path::new(path);
+        // Deterministic unique destination name derived from the full source path,
+        // so fonts with the same file name in different directories never collide.
         let file_name = src
-            .file_name()
-            .with_context(|| format!("font path has no file name: {}", src.display()))?
             .to_string_lossy()
-            .into_owned();
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() || c == '.' { c } else { '_' })
+            .collect::<String>();
         let dest = fonts_dir.join(&file_name);
-        if !dest.exists() {
-            std::fs::copy(src, &dest)
-                .with_context(|| format!("failed to copy font {} to {:?}", src.display(), dest))?;
-        }
+        std::fs::copy(src, &dest).with_context(|| format!("failed to copy font {} to {:?}", src.display(), dest))?;
         entries.push_str(&format!(
             "        Cow::Borrowed(include_bytes!(concat!(env!(\"OUT_DIR\"), \"/fncc_fonts/{file_name}\")) as &[u8]),\n"
         ));
@@ -109,14 +120,16 @@ fn generate_fonts_code(sheets: &HashMap<PathBuf, fncc_styles::Stylesheet>, out_f
     Ok(format!(
         "/// Register custom fonts declared via `@font-face` in `.fncss` files.\n\
          /// Call this in app startup, before opening any window:\n\
-         /// ```\n\
+         /// ```no_run\n\
          /// Application::new().run(|cx: &mut App| {{ fncc_load_fonts(cx); ... }});\n\
          /// ```\n\
          pub fn fncc_load_fonts(cx: &mut App) {{\n\
          \x20   use std::borrow::Cow;\n\
-         \x20   let _ = cx.text_system().add_fonts(vec![\n\
+         \x20   if let Err(e) = cx.text_system().add_fonts(vec![\n\
          {entries}\
-         \x20   ]);\n\
+         \x20   ]) {{\n\
+         \x20       eprintln!(\"Failed to load fonts: {{e:?}}\");\n\
+         \x20   }}\n\
          }}\n\n"
     ))
 }
@@ -451,6 +464,14 @@ pub fn generate_all_with_options(opts: GenerateOptions) -> Result<()> {
         let style_cascade = build_cascade(&pf.path, ui_dir, &fncss_sheets, pf.ast.styles.as_deref())
             .map_err(|e| anyhow::anyhow!("in '{}': {e}", pf.path.display()))?;
         let style_theme = pf.ast.theme.as_deref();
+        if let Some(theme_name) = style_theme
+            && !style_cascade.themes.contains_key(theme_name)
+        {
+            anyhow::bail!(
+                "in '{}': unknown theme `{theme_name}` declared via `@theme` — no matching `theme {theme_name} {{ ... }}` block in the cascade",
+                pf.path.display(),
+            );
+        }
         let generated = codegen::generate_with_imports(
             &pf.ast,
             file_id,
@@ -1367,9 +1388,17 @@ mod tests {
             content.contains("pub fn fncc_load_fonts(cx: &mut App)"),
             "missing fncc_load_fonts: {content}"
         );
-        assert!(content.contains("include_bytes!(concat!(env!(\"OUT_DIR\"), \"/fncc_fonts/Verdana.ttf\"))"));
+        let file_name: String = ui_dir
+            .join("./fonts/Verdana.ttf")
+            .to_string_lossy()
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() || c == '.' { c } else { '_' })
+            .collect();
+        assert!(content.contains(&format!(
+            "include_bytes!(concat!(env!(\"OUT_DIR\"), \"/fncc_fonts/{file_name}\"))"
+        )));
 
-        let copied = out_file.parent().unwrap().join("fncc_fonts").join("Verdana.ttf");
+        let copied = out_file.parent().unwrap().join("fncc_fonts").join(&file_name);
         assert!(copied.exists(), "font not copied to {:?}", copied);
         std::fs::remove_dir_all(&dir).unwrap();
     }

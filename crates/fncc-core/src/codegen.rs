@@ -427,6 +427,8 @@ fn generate_element(
             import_props,
             prop_fields,
             _import_has_slots,
+            style_cascade,
+            style_theme,
         ),
         "For" => format!(
             "div().children({})",
@@ -491,7 +493,10 @@ fn generate_element(
         }
     };
 
-    inject_element_styles(&code, el, style_cascade, style_theme).unwrap_or(code)
+    match inject_element_styles(&code, el, style_cascade, style_theme) {
+        Ok(code) => code,
+        Err(e) => format!("compile_error!({e:?})"),
+    }
 }
 
 fn gen_import_call(
@@ -660,6 +665,8 @@ fn gen_fragment(
     import_props: &[(&str, Option<&str>)],
     prop_fields: Option<&HashMap<String, Vec<PropField>>>,
     _import_has_slots: &[(&str, bool)],
+    style_cascade: Option<&fncc_styles::Stylesheet>,
+    style_theme: Option<&str>,
 ) -> String {
     let children_code = generate_children_code(
         &el.children,
@@ -670,8 +677,8 @@ fn gen_fragment(
         import_props,
         prop_fields,
         _import_has_slots,
-        None,
-        None,
+        style_cascade,
+        style_theme,
     );
     format!("{indent}div()\n{children_code}").trim_end().to_string()
 }
@@ -796,7 +803,7 @@ fn gen_stack(
             "gap" => {
                 let v = val.as_str();
                 if let Ok(n) = v.parse::<f64>() {
-                    out.push_str(&format!("{indent}    .gap(px({n}.))\n"));
+                    out.push_str(&format!("{indent}    .gap(px({}))\n", float_lit(n)));
                 }
             }
             _ => {}
@@ -988,6 +995,16 @@ fn gen_fallback(
 fn clean_inline(s: &str) -> String {
     let collapsed: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
     collapsed.replace(") .", ").")
+}
+
+/// Format an f64 as a valid Rust float literal: `12.` for whole numbers,
+/// `12.5` otherwise (avoids invalid `12.5.`).
+fn float_lit(n: f64) -> String {
+    if n.fract() == 0.0 {
+        format!("{n}.")
+    } else {
+        format!("{n}")
+    }
 }
 
 /// Resolve an interpolation expression to the correct Rust variable reference.
@@ -1206,7 +1223,7 @@ mod tests {
     #[test]
     fn test_regression_gap_with_decimal_does_not_produce_invalid_syntax() {
         let out = generate_from("<Stack gap=\"12.5\"></Stack>");
-        assert!(out.contains(".gap(px(12.5))") || out.contains(".gap(px(12.5.))"));
+        assert!(out.contains(".gap(px(12.5))"), "got: {out}");
     }
 
     #[test]

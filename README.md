@@ -220,7 +220,7 @@ The macro generates a **trampoline** (`__fncc_cmd_{name}`) that adapts the user'
     - [x] `<Fragment>`
     - [x] `<Slot>`
 - [x] Styling system: FNCC Styles
-    - [x] `<style>`
+    - [x] `<Styles>`
     - [x] `classes`
     - [x] `theme`
     - [x] `tokens`
@@ -229,7 +229,7 @@ The macro generates a **trampoline** (`__fncc_cmd_{name}`) that adapts the user'
 
 ### Next
 
-- [ ] File-Based Routing (FBR) - use `gpui-navigator`
+- [ ] File-Based Routing (FBR)
     - [ ] Route scanner
     - [ ] Route tree generation
     - [ ] Dynamic routes (`[id].fui`)

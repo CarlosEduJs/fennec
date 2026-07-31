@@ -1,9 +1,9 @@
 [workspace]
 members = [
-    "crates/fncc-core",
     "crates/fncc-macros",
-    "crates/fncc-runtime",
     "crates/fncc-styles",
+    "crates/fncc-core",
+    "crates/fncc-runtime",
     "crates/fncc",
     "apps/example-app",
     "apps/components-app",
