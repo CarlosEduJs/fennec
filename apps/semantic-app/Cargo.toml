@@ -8,4 +8,4 @@ version = "0.0.0"
 fncc = { path = "../../crates/fncc", version = "0.1.2" }
 
 [build-dependencies]
-fncc-core = { path = "../../crates/fncc-core", version = "0.6.0" }
+fncc-core = { path = "../../crates/fncc-core", version = "0.7.0" }

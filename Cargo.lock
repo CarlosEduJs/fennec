@@ -1821,7 +1821,7 @@ dependencies = [
 
 [[package]]
 name = "fncc-core"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "fncc-styles",
@@ -1858,7 +1858,7 @@ dependencies = [
 
 [[package]]
 name = "fncc-styles"
-version = "0.0.0"
+version = "0.1.0"
 
 [[package]]
 name = "fncc-styles-app"
