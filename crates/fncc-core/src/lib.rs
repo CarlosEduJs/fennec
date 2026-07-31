@@ -7,10 +7,10 @@ pub use parser::parse;
 
 use anyhow::{Context, Result};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Recursively collect all .fui files under `dir`.
-fn collect_fui_files(dir: &Path) -> Result<Vec<std::path::PathBuf>> {
+fn collect_fui_files(dir: &Path) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
     if !dir.is_dir() {
         return Ok(files);
@@ -25,6 +25,155 @@ fn collect_fui_files(dir: &Path) -> Result<Vec<std::path::PathBuf>> {
         }
     }
     Ok(files)
+}
+
+/// Collect all .fncss files under `dir`, returning map from parent dir to parsed stylesheet.
+fn collect_fncss_files(dir: &Path) -> Result<HashMap<PathBuf, fncc_styles::Stylesheet>> {
+    let mut sheets = HashMap::new();
+    collect_fncss_recursive(dir, &mut sheets)?;
+    Ok(sheets)
+}
+
+fn collect_fncss_recursive(current: &Path, sheets: &mut HashMap<PathBuf, fncc_styles::Stylesheet>) -> Result<()> {
+    if !current.is_dir() {
+        return Ok(());
+    }
+    let mut entries: Vec<_> = std::fs::read_dir(current)
+        .with_context(|| format!("failed to read dir {:?}", current))?
+        .collect::<std::io::Result<Vec<_>>>()
+        .with_context(|| format!("failed to read entry in {:?}", current))?;
+    entries.sort_by_key(|e| e.file_name());
+
+    for entry in entries {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_fncss_recursive(&path, sheets)?;
+        } else if path.extension().is_some_and(|ext| ext == "fncss") {
+            let content = std::fs::read_to_string(&path).with_context(|| format!("failed to read {:?}", path))?;
+            match fncc_styles::css_parser::parse(&content) {
+                Ok(mut ss) => {
+                    let parent = path.parent().unwrap_or(current).to_path_buf();
+                    resolve_font_paths(&mut ss, &parent)?;
+                    let merged = match sheets.remove(&parent) {
+                        Some(prev) => fncc_styles::merge(vec![prev, ss]),
+                        None => ss,
+                    };
+                    sheets.insert(parent, merged);
+                }
+                Err(e) => anyhow::bail!("failed to parse {:?}: {e}", path),
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Resolve relative `@font-face` src paths against the `.fncss` file's directory,
+/// producing absolute paths for the build.
+fn resolve_font_paths(ss: &mut fncc_styles::Stylesheet, base_dir: &Path) -> Result<()> {
+    for path in ss.fonts.values_mut() {
+        let p = Path::new(path.as_str());
+        if !p.is_absolute() {
+            *path = base_dir.join(p).to_string_lossy().to_string();
+        }
+    }
+    Ok(())
+}
+
+/// Copy all declared `@font-face` fonts into `$OUT_DIR/fncc_fonts` and generate a
+/// `fncc_load_fonts(cx: &mut App)` function that registers them with GPUI via
+/// `cx.text_system().add_fonts(...)`. Returns empty string when no fonts are declared.
+fn generate_fonts_code(sheets: &HashMap<PathBuf, fncc_styles::Stylesheet>, out_file: &Path) -> Result<String> {
+    let mut fonts: Vec<(&str, &str)> = Vec::new();
+    for sheet in sheets.values() {
+        for (family, path) in &sheet.fonts {
+            if !fonts.iter().any(|(f, p)| f == family && *p == path.as_str()) {
+                fonts.push((family.as_str(), path.as_str()));
+            }
+        }
+    }
+
+    if fonts.is_empty() {
+        return Ok(String::new());
+    }
+
+    let out_dir = out_file.parent().context("out_file has no parent directory")?;
+    let fonts_dir = out_dir.join("fncc_fonts");
+    std::fs::create_dir_all(&fonts_dir).context("failed to create fncc_fonts dir")?;
+
+    let mut entries = String::new();
+    for (_, path) in &fonts {
+        let src = Path::new(path);
+        // Deterministic unique destination name derived from the full source path,
+        // so fonts with the same file name in different directories never collide.
+        let file_name = src
+            .to_string_lossy()
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() || c == '.' { c } else { '_' })
+            .collect::<String>();
+        let dest = fonts_dir.join(&file_name);
+        std::fs::copy(src, &dest).with_context(|| format!("failed to copy font {} to {:?}", src.display(), dest))?;
+        entries.push_str(&format!(
+            "        Cow::Borrowed(include_bytes!(concat!(env!(\"OUT_DIR\"), \"/fncc_fonts/{file_name}\")) as &[u8]),\n"
+        ));
+    }
+
+    Ok(format!(
+        "/// Register custom fonts declared via `@font-face` in `.fncss` files.\n\
+         /// Call this in app startup, before opening any window:\n\
+         /// ```no_run\n\
+         /// Application::new().run(|cx: &mut App| {{ fncc_load_fonts(cx); ... }});\n\
+         /// ```\n\
+         pub fn fncc_load_fonts(cx: &mut App) {{\n\
+         \x20   use std::borrow::Cow;\n\
+         \x20   if let Err(e) = cx.text_system().add_fonts(vec![\n\
+         {entries}\
+         \x20   ]) {{\n\
+         \x20       eprintln!(\"Failed to load fonts: {{e:?}}\");\n\
+         \x20   }}\n\
+         }}\n\n"
+    ))
+}
+
+/// Build the style cascade for a .fui file at `fui_path` relative to `ui_dir`.
+/// Merges from least specific to most specific: root → parent dirs → same dir → inline <Styles>.
+fn build_cascade(
+    fui_path: &Path,
+    ui_dir: &Path,
+    fncss_sheets: &HashMap<PathBuf, fncc_styles::Stylesheet>,
+    inline_styles: Option<&str>,
+) -> Result<fncc_styles::Stylesheet> {
+    let mut cascade = Vec::new();
+
+    let fui_dir = fui_path.parent().unwrap_or(Path::new(""));
+
+    // Collect .fncss from root to the .fui's directory
+    let mut ancestors: Vec<PathBuf> = Vec::new();
+    let mut current = Some(fui_dir.to_path_buf());
+    while let Some(dir) = current {
+        if dir == ui_dir || dir.starts_with(ui_dir) || ui_dir.starts_with(&dir) {
+            ancestors.push(dir.clone());
+        }
+        if dir == ui_dir {
+            break;
+        }
+        current = dir.parent().map(|p| p.to_path_buf());
+    }
+    ancestors.reverse();
+
+    for dir in &ancestors {
+        if let Some(ss) = fncss_sheets.get(dir) {
+            cascade.push(ss.clone());
+        }
+    }
+
+    // Parse inline <Styles> and merge on top
+    if let Some(styles_text) = inline_styles {
+        let inline_ss = fncc_styles::css_parser::parse(styles_text)
+            .map_err(|e| anyhow::anyhow!("failed to parse <Styles> block: {e}"))?;
+        cascade.push(inline_ss);
+    }
+
+    Ok(fncc_styles::merge(cascade))
 }
 
 /// Structured parsed file for two-pass processing.
@@ -69,6 +218,9 @@ pub fn generate_all_with_options(opts: GenerateOptions) -> Result<()> {
     let ui_dir = opts.ui_dir;
     let out_file = opts.out_file;
     let files = collect_fui_files(ui_dir)?;
+
+    // Collect and parse .fncss files
+    let fncss_sheets = collect_fncss_files(ui_dir)?;
 
     // Pass 1: Parse all files
     let mut parsed_files: Vec<ParsedFile> = Vec::new();
@@ -213,6 +365,12 @@ pub fn generate_all_with_options(opts: GenerateOptions) -> Result<()> {
     let mut output = String::new();
     output.push_str("// Generated by fncc-core. Do not edit.\n\n");
 
+    // Collect custom fonts declared via @font-face and emit a loader function.
+    // Font files are copied to $OUT_DIR/fncc_fonts so the generated code can
+    // embed them with include_bytes!.
+    let fonts_code = generate_fonts_code(&fncss_sheets, out_file)?;
+    output.push_str(&fonts_code);
+
     for (file_id, pf) in parsed_files.iter().enumerate() {
         let resolved: Vec<(&str, &str)> = pf
             .ast
@@ -303,6 +461,17 @@ pub fn generate_all_with_options(opts: GenerateOptions) -> Result<()> {
             .collect();
 
         let prop_fields = semantic_db.as_ref().map(|db| &db.props_types);
+        let style_cascade = build_cascade(&pf.path, ui_dir, &fncss_sheets, pf.ast.styles.as_deref())
+            .map_err(|e| anyhow::anyhow!("in '{}': {e}", pf.path.display()))?;
+        let style_theme = pf.ast.theme.as_deref();
+        if let Some(theme_name) = style_theme
+            && !style_cascade.themes.contains_key(theme_name)
+        {
+            anyhow::bail!(
+                "in '{}': unknown theme `{theme_name}` declared via `@theme` — no matching `theme {theme_name} {{ ... }}` block in the cascade",
+                pf.path.display(),
+            );
+        }
         let generated = codegen::generate_with_imports(
             &pf.ast,
             file_id,
@@ -313,6 +482,8 @@ pub fn generate_all_with_options(opts: GenerateOptions) -> Result<()> {
             &import_props,
             prop_fields,
             &import_has_slots,
+            Some(&style_cascade),
+            style_theme,
         );
         output.push_str(&generated);
         output.push('\n');
@@ -1193,6 +1364,55 @@ mod tests {
         let content = std::fs::read_to_string(&out_file).unwrap();
         assert!(content.contains("render_footer()"));
         assert!(!content.contains("&"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_generate_font_loader() {
+        let (dir, ui_dir) = test_dir();
+        let fonts_dir = ui_dir.join("fonts");
+        std::fs::create_dir_all(&fonts_dir).unwrap();
+        std::fs::write(fonts_dir.join("Verdana.ttf"), b"fake font bytes").unwrap();
+        std::fs::write(ui_dir.join("App.fui"), "<Text>hello</Text>").unwrap();
+        std::fs::write(
+            ui_dir.join("styles.fncss"),
+            "@font-face { font-family: Verdana; src: url(\"./fonts/Verdana.ttf\"); }",
+        )
+        .unwrap();
+        let out_file = dir.join("out.rs");
+
+        generate_all(&ui_dir, &out_file).unwrap();
+
+        let content = std::fs::read_to_string(&out_file).unwrap();
+        assert!(
+            content.contains("pub fn fncc_load_fonts(cx: &mut App)"),
+            "missing fncc_load_fonts: {content}"
+        );
+        let file_name: String = ui_dir
+            .join("./fonts/Verdana.ttf")
+            .to_string_lossy()
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() || c == '.' { c } else { '_' })
+            .collect();
+        assert!(content.contains(&format!(
+            "include_bytes!(concat!(env!(\"OUT_DIR\"), \"/fncc_fonts/{file_name}\"))"
+        )));
+
+        let copied = out_file.parent().unwrap().join("fncc_fonts").join(&file_name);
+        assert!(copied.exists(), "font not copied to {:?}", copied);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_generate_font_loader_no_fonts() {
+        let (dir, ui_dir) = test_dir();
+        std::fs::write(ui_dir.join("App.fui"), "<Text>hello</Text>").unwrap();
+        let out_file = dir.join("out.rs");
+
+        generate_all(&ui_dir, &out_file).unwrap();
+
+        let content = std::fs::read_to_string(&out_file).unwrap();
+        assert!(!content.contains("fncc_load_fonts"));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

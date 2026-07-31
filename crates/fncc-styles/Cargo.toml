@@ -1,0 +1,10 @@
+[package]
+description = "CSS-like style compiler for fncc — parses .fncss and <Styles> into GPUI method chains"
+edition = "2024"
+homepage = "https://github.com/carlosedujs/fncc"
+license = "Apache-2.0"
+name = "fncc-styles"
+repository = "https://github.com/carlosedujs/fncc"
+version = "0.0.0"
+
+[dependencies]

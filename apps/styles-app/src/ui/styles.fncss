@@ -1,0 +1,38 @@
+@font-face {
+    font-family: Verdana;
+    src: url("./fonts/Verdana.ttf");
+}
+
+:root {
+    $primary: #0066cc;
+    $radius: 8px;
+    $spacing: 16px;
+    $bg: #f5f5f5;
+    $font: Verdana;
+}
+
+theme dark {
+    $primary: #66ccff;
+    $bg: #1a1a2e;
+}
+
+.container {
+    padding: $spacing;
+    background: $bg;
+    border-radius: $radius;
+    width: 100%;
+    font-family: $font;
+}
+
+.title {
+    font-size: 24px;
+    font-weight: bold;
+    color: $primary;
+    text-align: center;
+}
+
+.card {
+    padding: 12px;
+    background: white;
+    border-radius: $radius;
+}

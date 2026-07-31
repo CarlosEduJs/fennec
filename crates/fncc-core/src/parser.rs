@@ -26,7 +26,9 @@ pub enum ImportSource {
 pub struct Document {
     pub frontmatter: Option<String>,
     pub state_type: Option<String>,
+    pub theme: Option<String>,
     pub imports: Vec<ComponentImport>,
+    pub styles: Option<String>,
     pub root: Element,
 }
 
@@ -57,7 +59,9 @@ pub fn parse(source: &str) -> Result<Document, String> {
 
     let mut frontmatter = None;
     let mut state_type = None;
+    let mut theme = None;
     let mut imports = Vec::new();
+    let mut styles = None;
     let mut root = None;
 
     for inner in pair.into_inner() {
@@ -70,19 +74,18 @@ pub fn parse(source: &str) -> Result<Document, String> {
                     .map(|s| s.trim().to_string());
 
                 if let Some(ref raw) = content {
-                    // extract @state directive and component imports
                     let mut clean_lines = Vec::new();
                     let mut component_imports = Vec::new();
                     for line in raw.lines() {
                         let trimmed = line.trim();
                         if let Some(st) = trimmed.strip_prefix("@state ") {
                             state_type = Some(st.trim().to_string());
+                        } else if let Some(t) = trimmed.strip_prefix("@theme ") {
+                            theme = Some(t.trim().to_string());
                         } else if is_component_import_line(trimmed) {
                             if let Some(imports) = parse_component_imports(trimmed) {
                                 component_imports.extend(imports);
                             }
-                            // Only strip from emitted Rust if it's a .fui import,
-                            // not a gpui import (those are real Rust)
                             if !trimmed.starts_with("use gpui::") {
                                 continue;
                             }
@@ -98,6 +101,15 @@ pub fn parse(source: &str) -> Result<Document, String> {
                     }
                 }
             }
+            Rule::styles_block => {
+                let raw = inner.as_str().trim();
+                let content = raw
+                    .strip_prefix("<Styles>")
+                    .and_then(|s| s.strip_suffix("</Styles>"))
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty());
+                styles = content;
+            }
             Rule::element => {
                 root = Some(parse_element(inner)?);
             }
@@ -108,7 +120,9 @@ pub fn parse(source: &str) -> Result<Document, String> {
     Ok(Document {
         frontmatter,
         state_type,
+        theme,
         imports,
+        styles,
         root: root.expect("document must have a root element"),
     })
 }
@@ -838,5 +852,58 @@ mod tests {
             doc.imports[0].source,
             ImportSource::FuiPath("ui::layout::sidebar::SidePanel".into())
         );
+    }
+
+    // --- Styles block tests ---
+
+    #[test]
+    fn test_parse_styles_block() {
+        let src = "<Styles>\n.btn { color: red; }\n</Styles>\n<Text>hi</Text>";
+        let doc = parse(src).unwrap();
+        assert_eq!(doc.styles, Some(".btn { color: red; }".into()));
+    }
+
+    #[test]
+    fn test_parse_styles_block_empty() {
+        let src = "<Styles>\n\n</Styles>\n<Text>hi</Text>";
+        let doc = parse(src).unwrap();
+        assert_eq!(doc.styles, None);
+    }
+
+    #[test]
+    fn test_parse_styles_block_absent() {
+        let doc = parse("<Text>hi</Text>").unwrap();
+        assert_eq!(doc.styles, None);
+    }
+
+    #[test]
+    fn test_parse_styles_with_frontmatter() {
+        let src = "---\n@state AppState\n---\n<Styles>\n.btn { color: red; }\n</Styles>\n<Stack></Stack>";
+        let doc = parse(src).unwrap();
+        assert_eq!(doc.styles, Some(".btn { color: red; }".into()));
+        assert_eq!(doc.state_type, Some("AppState".into()));
+    }
+
+    // --- @theme directive tests ---
+
+    #[test]
+    fn test_theme_directive() {
+        let src = "---\n@theme dark\n---\n<Text>hi</Text>";
+        let doc = parse(src).unwrap();
+        assert_eq!(doc.theme, Some("dark".into()));
+    }
+
+    #[test]
+    fn test_theme_default_none() {
+        let doc = parse("<Text>hi</Text>").unwrap();
+        assert_eq!(doc.theme, None);
+    }
+
+    #[test]
+    fn test_theme_with_state() {
+        let src = "---\n@state AppState\n@theme dark\n---\n<Stack></Stack>";
+        let doc = parse(src).unwrap();
+        assert_eq!(doc.state_type, Some("AppState".into()));
+        assert_eq!(doc.theme, Some("dark".into()));
     }
 }

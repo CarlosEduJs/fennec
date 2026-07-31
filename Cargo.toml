@@ -1,7 +1,8 @@
 [workspace]
 members = [
-    "crates/fncc-core",
     "crates/fncc-macros",
+    "crates/fncc-styles",
+    "crates/fncc-core",
     "crates/fncc-runtime",
     "crates/fncc",
     "apps/example-app",
@@ -9,6 +10,7 @@ members = [
     "apps/semantic-app",
     "apps/props-app",
     "apps/flow-app",
+    "apps/styles-app",
     "xtask",
 ]
 resolver = "3"
