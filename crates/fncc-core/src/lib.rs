@@ -1537,8 +1537,8 @@ mod tests {
         assert!(code.contains("UsersId {"));
 
         // Route::render cascades nested layouts
-        assert!(code.contains("Route::Dashboard => render_layout(render_dashboard_layout(render_dashboard()))"));
-        assert!(code.contains("Route::UsersId { id } => render_layout(render_users_id(&id))"));
+        assert!(code.contains("Route::Dashboard => render_layout(render_dashboard_layout(render_dashboard())).into_any_element()"));
+        assert!(code.contains("Route::UsersId { id } => render_layout(render_users_id(id.as_str())).into_any_element()"));
 
         std::fs::remove_dir_all(&dir).unwrap();
     }

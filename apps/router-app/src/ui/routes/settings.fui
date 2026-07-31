@@ -1,0 +1,21 @@
+<Styles>
+.settings-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-title {
+  color: #f4f4f5;
+  font-size: 18px;
+}
+
+.settings-desc {
+  color: #a1a1aa;
+}
+</Styles>
+
+<Stack class="settings-card">
+    <Text class="settings-title">Settings</Text>
+    <Text class="settings-desc">Application preferences and configuration options.</Text>
+</Stack>

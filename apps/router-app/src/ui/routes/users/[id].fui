@@ -1,0 +1,21 @@
+<Styles>
+.user-profile {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.user-title {
+  color: #f4f4f5;
+  font-size: 18px;
+}
+
+.user-param {
+  color: #a1a1aa;
+}
+</Styles>
+
+<Stack class="user-profile">
+    <Text class="user-title">User Profile</Text>
+    <Text class="user-param">User ID: {id}</Text>
+</Stack>

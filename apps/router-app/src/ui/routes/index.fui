@@ -1,0 +1,40 @@
+<Styles>
+.home-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.home-title {
+  color: #f4f4f5;
+  font-size: 18px;
+}
+
+.home-desc {
+  color: #a1a1aa;
+}
+
+.deep-link-box {
+  display: flex;
+  flex-direction: column;
+  background: #09090b;
+  padding: 12px;
+  border-radius: 4px;
+  gap: 6px;
+}
+
+.deep-link-code {
+  color: #d4d4d8;
+  font-family: monospace;
+}
+</Styles>
+
+<Stack class="home-card">
+    <Text class="home-title">Home</Text>
+    <Text class="home-desc">Native file-based routing for GPUI desktop applications.</Text>
+    <Stack class="deep-link-box">
+        <Text class="home-desc">Supported Deep Link URIs:</Text>
+        <Text class="deep-link-code">myapp://users/alice</Text>
+        <Text class="deep-link-code">myapp://dashboard/analytics</Text>
+    </Stack>
+</Stack>

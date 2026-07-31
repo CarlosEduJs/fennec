@@ -248,7 +248,7 @@ fn gen_if_expr(
         }
         if el.name != "Else" {
             if let Some(cond) = parser::get_condition_attr(el) {
-                let e = interpolation_expr(cond);
+                let e = interpolation_expr(cond, stateful);
                 expr.push_str(&e);
                 expr.push(' ');
             } else {
@@ -263,7 +263,7 @@ fn gen_if_expr(
             [single] => match single {
                 Node::Text(t) => expr.push_str(&format!("div().child({:?})", t)),
                 Node::Interpolation(interp) => {
-                    let e = interpolation_expr(interp);
+                    let e = interpolation_expr(interp, stateful);
                     expr.push_str(&format!("div().child({e}.to_string())"));
                 }
                 Node::Element(child_el) => {
@@ -287,7 +287,7 @@ fn gen_if_expr(
                     match child {
                         Node::Text(t) => expr.push_str(&format!(".child({:?})", t)),
                         Node::Interpolation(interp) => {
-                            let e = interpolation_expr(interp);
+                            let e = interpolation_expr(interp, stateful);
                             expr.push_str(&format!(".child({e}.to_string())"));
                         }
                         Node::Element(child_el) => {
@@ -336,7 +336,7 @@ fn gen_for_expr(
     };
     let let_var = parser::get_let_attr(el).unwrap_or("item");
     let index_var = parser::get_index_attr(el);
-    let iter_expr = interpolation_expr(each);
+    let iter_expr = interpolation_expr(each, stateful);
 
     let mut body = String::new();
     match &el.children[..] {
@@ -344,7 +344,7 @@ fn gen_for_expr(
         [single] => match single {
             Node::Text(t) => body.push_str(&format!("div().child({:?})", t)),
             Node::Interpolation(interp) => {
-                let e = interpolation_expr(interp);
+                let e = interpolation_expr(interp, stateful);
                 body.push_str(&format!("div().child({e}.to_string())"));
             }
             Node::Element(child_el) => {
@@ -368,7 +368,7 @@ fn gen_for_expr(
                 match child {
                     Node::Text(t) => body.push_str(&format!(".child({:?})", t)),
                     Node::Interpolation(interp) => {
-                        let e = interpolation_expr(interp);
+                        let e = interpolation_expr(interp, stateful);
                         body.push_str(&format!(".child({e}.to_string())"));
                     }
                     Node::Element(child_el) => {
@@ -585,7 +585,7 @@ fn gen_import_call(
                 if let Some((_, attr_val)) = el.attrs.iter().find(|(n, _)| n == &f.name) {
                     let v = match attr_val {
                         AttrValue::String(s) => format!("{:?}.into()", s),
-                        AttrValue::Interpolation(expr) => format!("{}.into()", interpolation_expr(expr)),
+                        AttrValue::Interpolation(expr) => format!("{}.into()", interpolation_expr(expr, stateful)),
                     };
                     struct_fields.push_str(&format!("\n{indent}        {}: {},", f.name, v));
                 } else if f.is_optional {
@@ -599,7 +599,7 @@ fn gen_import_call(
                 }
                 let v = match attr_val {
                     AttrValue::String(s) => format!("{:?}.into()", s),
-                    AttrValue::Interpolation(expr) => format!("{}.into()", interpolation_expr(expr)),
+                    AttrValue::Interpolation(expr) => format!("{}.into()", interpolation_expr(expr, stateful)),
                 };
                 struct_fields.push_str(&format!("\n{indent}        {attr_name}: {v},"));
             }
@@ -806,7 +806,7 @@ fn generate_children_code(
                         out.push_str(&format!("{indent}        {:?}", t));
                     }
                     Node::Interpolation(expr) => {
-                        let e = interpolation_expr(expr);
+                        let e = interpolation_expr(expr, stateful);
                         out.push_str(&format!("{indent}        {e}.to_string()"));
                     }
                 }
@@ -905,7 +905,7 @@ fn gen_text(
             out.push_str(&format!("{indent}    .child({:?})", t));
         }
         [Node::Interpolation(expr)] => {
-            let e = interpolation_expr(expr);
+            let e = interpolation_expr(expr, stateful);
             out.push_str(&format!("{indent}    .child({e}.to_string())"));
         }
         children => {
@@ -971,7 +971,7 @@ fn gen_button(
     match &el.children[..] {
         [Node::Text(t)] => out.push_str(&format!("{indent}    .child({:?})", t)),
         [Node::Interpolation(expr)] => {
-            let e = interpolation_expr(expr);
+            let e = interpolation_expr(expr, stateful);
             out.push_str(&format!("{indent}    .child({e}.to_string())"));
         }
         children => {
@@ -1044,18 +1044,25 @@ fn float_lit(n: f64) -> String {
     }
 }
 
-/// Resolve an interpolation expression to the correct Rust variable reference.
-/// - `state.field` → `self.field` (for stateful components)
-/// - `props.field` → `props.field` (for stateless components with props)
-/// - `bare_expr` → `self.bare_expr` (fallback for stateful components)
-fn interpolation_expr(expr: &str) -> String {
+/// Transform an interpolation expression for code generation.
+///
+/// - `state.field` -> `self.field` (stateful) or `field` (stateless)
+/// - `props.field` -> `props.field`
+/// - `bare_expr` -> `self.bare_expr` (stateful) or `bare_expr` (stateless)
+fn interpolation_expr(expr: &str, stateful: bool) -> String {
     let trimmed = expr.trim();
     if let Some(field) = trimmed.strip_prefix("state.") {
-        format!("self.{field}")
+        if stateful {
+            format!("self.{field}")
+        } else {
+            field.to_string()
+        }
     } else if trimmed.starts_with("props.") {
         trimmed.to_string()
-    } else {
+    } else if stateful {
         format!("self.{trimmed}")
+    } else {
+        trimmed.to_string()
     }
 }
 
@@ -1226,8 +1233,8 @@ mod tests {
     #[test]
     fn test_interpolation_strips_state_prefix() {
         let out = generate_from("<Text>{state.count}</Text>");
-        // stateless, so state. prefix is stripped but no self. prefix
-        assert!(out.contains("self.count.to_string()"));
+        // stateless, so state. prefix is stripped and no self. prefix
+        assert!(out.contains("count.to_string()"));
     }
 
     #[test]
@@ -1614,7 +1621,7 @@ mod tests {
     #[test]
     fn test_if_generates_if_expression() {
         let out = generate_from("<If condition=\"{state.show}\"><Text>Hi</Text></If>");
-        assert!(out.contains("if self.show {"));
+        assert!(out.contains("if show {"));
         assert!(out.contains("div().child(div().child(\"Hi\"))"));
         assert!(out.contains("} else {"), "else branch should be present");
         assert!(out.contains("div() }"));
@@ -1624,7 +1631,7 @@ mod tests {
     fn test_if_else_chain() {
         let src = "<Stack><If condition=\"{state.a}\"><Text>A</Text></If><Else><Text>B</Text></Else></Stack>";
         let out = generate_from(src);
-        assert!(out.contains("if self.a {"));
+        assert!(out.contains("if a {"));
         assert!(out.contains("} else {"));
         assert!(out.contains("div().child(\"B\")"));
     }
@@ -1633,15 +1640,15 @@ mod tests {
     fn test_if_elseif_else_chain() {
         let src = "<Stack><If condition=\"{state.x}\"><Text>X</Text></If><ElseIf condition=\"{state.y}\"><Text>Y</Text></ElseIf><Else><Text>Z</Text></Else></Stack>";
         let out = generate_from(src);
-        assert!(out.contains("if self.x {"));
-        assert!(out.contains("else if self.y {"));
+        assert!(out.contains("if x {"));
+        assert!(out.contains("else if y {"));
         assert!(out.contains("else {"));
     }
 
     #[test]
     fn test_for_generates_iteration() {
         let out = generate_from("<For each=\"{state.items}\" let=\"item\"><Text>{item.name}</Text></For>");
-        assert!(out.contains("self.items.iter().map(|item| {"));
+        assert!(out.contains("items.iter().map(|item| {"));
         assert!(out.contains("item.name"));
     }
 
@@ -1682,7 +1689,7 @@ mod tests {
     fn test_if_in_stack() {
         let src = "<Stack><If condition=\"{state.flag}\"><Text>Yes</Text></If><Text>Always</Text></Stack>";
         let out = generate_from(src);
-        assert!(out.contains("if self.flag {"));
+        assert!(out.contains("if flag {"));
         assert!(out.contains("\"Always\""));
     }
 
@@ -1690,7 +1697,7 @@ mod tests {
     fn test_for_in_stack() {
         let src = "<Stack><For each=\"{state.items}\" let=\"item\"><Text>{item}</Text></For></Stack>";
         let out = generate_from(src);
-        assert!(out.contains("self.items.iter().map(|item| {"));
+        assert!(out.contains("items.iter().map(|item| {"));
         assert!(out.contains(".children("));
     }
 

@@ -11,6 +11,7 @@ members = [
     "apps/props-app",
     "apps/flow-app",
     "apps/styles-app",
+    "apps/router-app",
     "xtask",
 ]
 resolver = "3"

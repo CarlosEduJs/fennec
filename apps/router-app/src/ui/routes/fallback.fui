@@ -1,0 +1,21 @@
+<Styles>
+.fallback-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.fallback-title {
+  color: #f4f4f5;
+  font-size: 18px;
+}
+
+.fallback-desc {
+  color: #a1a1aa;
+}
+</Styles>
+
+<Stack class="fallback-card">
+    <Text class="fallback-title">404 - Not Found</Text>
+    <Text class="fallback-desc">The requested route does not exist.</Text>
+</Stack>

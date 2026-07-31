@@ -498,11 +498,11 @@ pub fn generate_router_code(tree: &RouteTree) -> String {
         ));
     }
     out.push_str("        }\n");
-    out.push_str("    }\n");
+    out.push_str("    }\n\n");
 
-    // pub fn render(&self) -> impl IntoElement
+    // pub fn render(&self) -> AnyElement
     out.push_str("    /// Render the view hierarchy corresponding to this route.\n");
-    out.push_str("    pub fn render(&self) -> impl IntoElement {\n");
+    out.push_str("    pub fn render(&self) -> AnyElement {\n");
     out.push_str("        match self {\n");
 
     for route in &tree.routes {
@@ -511,7 +511,7 @@ pub fn generate_router_code(tree: &RouteTree) -> String {
         let mut target_call = if route.params.is_empty() {
             format!("{}()", target_fn)
         } else {
-            let param_args: Vec<String> = route.params.iter().map(|p| format!("&{}", p)).collect();
+            let param_args: Vec<String> = route.params.iter().map(|p| format!("{}.as_str()", p)).collect();
             format!("{}({})", target_fn, param_args.join(", "))
         };
 
@@ -523,12 +523,12 @@ pub fn generate_router_code(tree: &RouteTree) -> String {
 
         if route.params.is_empty() {
             out.push_str(&format!(
-                "            Route::{} => {},\n",
+                "            Route::{} => {}.into_any_element(),\n",
                 route.variant_name, target_call
             ));
         } else {
             out.push_str(&format!(
-                "            Route::{} {{ {} }} => {},\n",
+                "            Route::{} {{ {} }} => {}.into_any_element(),\n",
                 route.variant_name,
                 route.params.join(", "),
                 target_call
@@ -537,13 +537,15 @@ pub fn generate_router_code(tree: &RouteTree) -> String {
     }
 
     if let Some(fb) = &tree.fallback {
-        let fallback_fn = format!("render_{}", crate::codegen::to_snake_case(&fb.variant_name));
-        let mut call = format!("{}()", fallback_fn);
+        let mut target_call = "render_fallback()".to_string();
         for layout_rel in fb.layout_chain.iter().rev() {
             let layout_fn = layout_fn_name(layout_rel);
-            call = format!("{}({})", layout_fn, call);
+            target_call = format!("{}({})", layout_fn, target_call);
         }
-        out.push_str(&format!("            Route::{} => {},\n", fb.variant_name, call));
+        out.push_str(&format!(
+            "            Route::{} => {}.into_any_element(),\n",
+            fb.variant_name, target_call
+        ));
     }
 
     out.push_str("        }\n");
@@ -551,7 +553,7 @@ pub fn generate_router_code(tree: &RouteTree) -> String {
     out.push_str("}\n\n");
 
     out.push_str("/// Render the active route outlet.\n");
-    out.push_str("pub fn render_router_outlet(route: &Route) -> impl IntoElement {\n");
+    out.push_str("pub fn render_router_outlet(route: &Route) -> AnyElement {\n");
     out.push_str("    route.render()\n");
     out.push_str("}\n\n");
 
@@ -578,7 +580,8 @@ mod tests {
 
     fn test_routes_dir() -> (PathBuf, PathBuf) {
         let id = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let root = std::env::temp_dir().join(format!("fncc_router_test_{id}"));
+        let pid = std::process::id();
+        let root = std::env::temp_dir().join(format!("fncc_router_test_{pid}_{id}"));
         let routes = root.join("routes");
         std::fs::create_dir_all(&routes).unwrap();
         (root, routes)
@@ -732,8 +735,8 @@ mod tests {
         assert!(code.contains("if let [\"users\", id] = segs.as_slice()"));
 
         assert!(code.contains("pub fn path(&self) -> String"));
-        assert!(code.contains("pub fn render(&self) -> impl IntoElement"));
-        assert!(code.contains("pub fn render_router_outlet(route: &Route) -> impl IntoElement"));
+        assert!(code.contains("pub fn render(&self) -> AnyElement"));
+        assert!(code.contains("pub fn render_router_outlet(route: &Route) -> AnyElement"));
 
         std::fs::remove_dir_all(&root).unwrap();
     }

@@ -1,0 +1,22 @@
+<Styles>
+.analytics-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.analytics-title {
+  color: #f4f4f5;
+  font-size: 16px;
+}
+
+.analytics-metric {
+  color: #a1a1aa;
+}
+</Styles>
+
+<Stack class="analytics-card">
+    <Text class="analytics-title">Analytics</Text>
+    <Text class="analytics-metric">Active Session Count: 42</Text>
+    <Text class="analytics-metric">Navigation Latency: 0.1ms</Text>
+</Stack>
