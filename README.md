@@ -227,15 +227,90 @@ The macro generates a **trampoline** (`__fncc_cmd_{name}`) that adapts the user'
     - [x] `style compiler`
     - [x] `variables`
 
-### Next
-
-- [ ] File-Based Routing (FBR)
+- [ ] Native File-Based Routing (NFBR)
     - [ ] Route scanner
     - [ ] Route tree generation
     - [ ] Dynamic routes (`[id].fui`)
     - [ ] Route parameters
     - [ ] Navigation API
     - [ ] Layout routes (optional)
+
+### Next
+
+- [ ] Interactions
+    - [ ] Mouse & Pointer
+        - [ ] Click (`onclick`)
+        - [ ] Double Click (`ondoubleclick`)
+        - [ ] Mouse Down (`onmousedown`)
+        - [ ] Mouse Up (`onmouseup`)
+        - [ ] Mouse Enter (`onmouseenter`)
+        - [ ] Mouse Leave (`onmouseleave`)
+        - [ ] Mouse Move (`onmousemove`)
+        - [ ] Mouse Down Outside (`onmousedownout`)
+        - [ ] Mouse Up Outside (`onmouseupout`)
+        - [ ] Scroll Wheel (`onscrollwheel`)
+        - [ ] Pointer Pressure (where supported)
+
+    - [ ] Hover & Active States
+        - [ ] `:hover`
+        - [ ] `:active`
+        - [ ] Group Hover
+        - [ ] Group Active
+
+    - [ ] Keyboard & Focus
+        - [ ] Focus (`onfocus`)
+        - [ ] Blur (`onblur`)
+        - [ ] Key Down (`onkeydown`)
+        - [ ] Key Up (`onkeyup`)
+        - [ ] Focusable Elements
+        - [ ] Tab Stop
+        - [ ] Tab Index
+        - [ ] Tab Groups
+        - [ ] Actions API
+        - [ ] Keymap Support
+
+    - [ ] Drag & Drop
+        - [ ] Drag Start
+        - [ ] Drag Move
+        - [ ] Drag End
+        - [ ] Drop Target
+        - [ ] Drop Validation (`can_drop`)
+
+    - [ ] Tooltips
+        - [ ] Tooltip
+        - [ ] Interactive Tooltip
+
+    - [ ] Scroll
+        - [ ] Overflow Scroll
+        - [ ] Horizontal Scroll
+        - [ ] Vertical Scroll
+        - [ ] Scroll Handle
+        - [ ] Scroll Tracking
+
+    - [ ] Lists
+        - [ ] Virtualized List
+        - [ ] Uniform List
+
+    - [ ] Popovers & Anchors
+        - [ ] Popover
+        - [ ] Anchored Elements
+        - [ ] Auto Close (outside click)
+
+    - [ ] Animations
+        - [ ] Basic Animations
+        - [ ] Transition Support
+
+    - [ ] Accessibility
+        - [ ] Focus Visible
+        - [ ] Semantic Actions
+        - [ ] Accessibility Roles
+        - [ ] Keyboard Navigation
+
+    - [ ] Text Input
+        - [ ] IME Support
+        - [ ] Text Selection
+        - [ ] Clipboard Integration
+        - [ ] Caret Management
 
 - [ ] LSP metadata generation
     - [ ] autocomplete

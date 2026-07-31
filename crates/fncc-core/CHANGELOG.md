@@ -1,6 +1,48 @@
 # Changelog - fncc-core
 
 All notable changes to `fncc-core` crate will be documented in this file.
+## [0.8.0] - 2026-07-31
+
+- Implement Native File-Based Routing (NFBR) compiler pipeline.
+  This feature automates route discovery, layout cascading, validation, and strongly-typed code generation at compile time.
+  It closes issue [#22](https://github.com/CarlosEduJs/fncc/issues/22).
+
+  ### Details
+
+  1. **Route Scanning**: Recursively scans the `src/ui/routes` directory, automatically identifying:
+     - Index routes (`index.fui` -> `/`)
+     - Static routes (`settings.fui` -> `/settings`)
+     - Pathless route groups (e.g. `(dashboard)/analytics.fui` -> `/analytics`)
+     - Dynamic parameters (`users/[id].fui` -> `/users/:id`)
+     - Layout files (`layout.fui`)
+     - Fallbacks (`fallback.fui`)
+
+  2. **Priority Resolution**: Static path segments take priority over dynamic parameter segments (e.g. `/users/settings` resolves before `/users/:id`).
+
+  3. **Strongly-Typed Code Generation**: Generates a type-safe `Route` enum and navigation logic.
+     
+     ```rust
+     // Generated in target directory (generated.rs)
+     #[derive(Clone, Debug, PartialEq, Eq)]
+     pub enum Route {
+         Index,
+         Settings,
+         UsersId { id: String },
+     }
+     ```
+
+  4. **Layout Nesting**: Maps `<RouterOutlet />` elements inside FUI files to standard child elements. Stateless layouts render with the following signature:
+     
+     ```rust
+     pub fn render_layout(children: impl IntoElement) -> impl IntoElement;
+     ```
+
+  5. **Dynamic Parameter Passing**: Generates stateless view functions that accept parameter values parsed from the URI stack:
+     
+     ```rust
+     pub fn render_users_id(id: &str) -> impl IntoElement;
+     ```
+
 ## [0.7.0] - 2026-07-31
 
 ### Styles Integration (`<Styles>` + `.fncss`)

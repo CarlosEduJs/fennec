@@ -1813,7 +1813,7 @@ dependencies = [
 
 [[package]]
 name = "fncc"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "fncc-macros",
  "fncc-runtime",
@@ -1821,7 +1821,7 @@ dependencies = [
 
 [[package]]
 name = "fncc-core"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "fncc-styles",
@@ -1859,7 +1859,7 @@ dependencies = [
 
 [[package]]
 name = "fncc-runtime"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "gpui",
 ]

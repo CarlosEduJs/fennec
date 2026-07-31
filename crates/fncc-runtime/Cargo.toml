@@ -5,7 +5,7 @@ homepage = "https://github.com/carlosedujs/fncc"
 license = "Apache-2.0"
 name = "fncc-runtime"
 repository = "https://github.com/carlosedujs/fncc"
-version = "0.1.0"
+version = "0.2.0"
 
 [dependencies]
 gpui = "0.2.2"
