@@ -1,9 +1,11 @@
 pub mod codegen;
 pub mod config;
 pub mod parser;
+pub mod router;
 pub mod semantic;
 
 pub use parser::parse;
+pub use router::{RouteInfo, RouteTree};
 
 use anyhow::{Context, Result};
 use std::collections::HashMap;
