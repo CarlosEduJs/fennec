@@ -5,6 +5,6 @@ homepage = "https://github.com/carlosedujs/fncc"
 license = "Apache-2.0"
 name = "fncc-styles"
 repository = "https://github.com/carlosedujs/fncc"
-version = "0.1.0"
+version = "0.0.0"
 
 [dependencies]
